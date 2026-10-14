@@ -20,6 +20,9 @@
   h1:hover::after{opacity:1}
   h1:active{opacity:.65}
   .stats{display:flex;gap:22px;margin-left:auto;flex-wrap:wrap}
+  .motto{align-self:center;margin-left:14px;padding-left:14px;
+         border-left:1px solid var(--line);
+         color:var(--dim);opacity:.5;font-size:11px;letter-spacing:3px;white-space:nowrap}
   .stat{text-align:right}
   .stat b{display:block;font-size:20px;font-weight:600;line-height:1.2}
   .stat span{color:var(--dim);font-size:11px}
@@ -170,6 +173,7 @@
 
 <header>
   <h1 id="app-title" title="点击重启服务" onclick="restart()">MQTT 转发</h1>
+  <div class="motto">共产 · 共和 · 大同</div>
   <div class="stats">
     <div class="stat"><b id="s-in">0</b><span>收到</span></div>
     <div class="stat"><b id="s-out" class="ok">0</b><span>转发</span></div>

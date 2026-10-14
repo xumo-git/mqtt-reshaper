@@ -73,6 +73,7 @@ def img(name, width=6.4):
 
 # ================================================================ 封面
 t = doc.add_heading("MQTT 报文转换 / 转发工具", level=0)
+p("共产 · 共和 · 大同", size=9, color=RGBColor(0xAA, 0xAA, 0xAA))
 p("把 MQTT 上的报文按规则改写成你想要的格式，再转发出去。", bold=True, size=12)
 p("不动厂商 DLL，格式全在配置文件里改。", size=11, color=RGBColor(0x55, 0x55, 0x55))
 img("arch.png")
@@ -296,8 +297,16 @@ bullets([
 p("结论：格式让配置管，别跟二进制较劲。", bold=True)
 
 doc.add_paragraph()
-p("MIT License. 随便用，随便改。有问题提 Issue。", size=9,
-  color=RGBColor(0x88, 0x88, 0x88))
+h("十、许可与使用场景", 1)
+table(["你打算怎么用", "可以吗"], [
+    ["自己用 / 学习 / 研究", "随便"],
+    ["拿去赚钱", "可以，打个招呼就行"],
+    ["抄走闭源去卖", "不行 —— 用了它，你的改动也必须同样开源"],
+])
+p("协议是 GPL-3.0，全文见仓库里的 LICENSE 文件。")
+p("拜托一件事：你用在什么场景，开个 Issue 或发邮件告诉我一声。我会按真实场景继续改进它 —— 你踩到的坑别人也会踩到。",
+  bold=True)
+p("有问题提 Issue。", size=9, color=RGBColor(0x88, 0x88, 0x88))
 
 doc.save(OUT)
 print("输出:", OUT, "%.0f KB" % (os.path.getsize(OUT) / 1024))
