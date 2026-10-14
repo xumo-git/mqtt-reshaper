@@ -1,0 +1,174 @@
+{
+  "brokers": {
+    "本地EMQX": {
+      "host": "127.0.0.1",
+      "port": 1883,
+      "username": "改成你的用户名",
+      "topic": "kingscada",
+      "password": "改成你的密码"
+    },
+    "IOServer转发": {
+      "host": "127.0.0.1",
+      "port": 1883,
+      "username": "改成你的用户名",
+      "topic": "kingscada",
+      "password": "改成你的密码"
+    },
+    "IOServer_PUB": {
+      "host": "127.0.0.1",
+      "port": 1883,
+      "username": "改成你的用户名",
+      "topic": "kingscada",
+      "password": "改成你的密码"
+    },
+    "虚拟机里的": {
+      "host": "10.13.33.242",
+      "port": 1883,
+      "username": "改成你的用户名",
+      "topic": "",
+      "password": "改成你的密码"
+    }
+  },
+  "rule_library": {
+    "IOSERVER转发": {
+      "match": "@PNs",
+      "each": "@Objs",
+      "sample": {
+        "PNs": {
+          "1": "V",
+          "2": "T",
+          "3": "Q"
+        },
+        "PVs": {
+          "1": 1616,
+          "2": "2026-10-09 17:16:47.569",
+          "3": 192
+        },
+        "Objs": [
+          {
+            "N": "pub10"
+          },
+          {
+            "1": 0,
+            "N": "pub11"
+          },
+          {
+            "1": 15,
+            "N": "pub14"
+          }
+        ]
+      },
+      "template": {
+        "DataName": "@#value.N",
+        "DataValue": "@#value.1|PVs.1",
+        "DataTime": "@#ts",
+        "DataQuality": "@#value.3|PVs.3",
+        "转发规则": "IOSERVER转发"
+      }
+    },
+    "IOSERVER直发": {
+      "match": "@tag1|/tag1",
+      "each": "@.",
+      "sample": {
+        "tag1": 0,
+        "tag2": 0,
+        "tag3": 0,
+        "tag4": 0,
+        "tag5": 0,
+        "tag6": 0,
+        "tag7": 0,
+        "tag8": 0,
+        "tag9": 0,
+        "tag10": 0
+      },
+      "template": {
+        "DataName": "@#key",
+        "DataValue": "@#value",
+        "DataTime": "@#now",
+        "转发规则": "IOSERVER直发",
+        "新加字段": "@#value"
+      }
+    },
+    "IOSERVER转发-副本": {
+      "match": "@PNs",
+      "each": "@Objs",
+      "sample": {
+        "PNs": {
+          "1": "V",
+          "2": "T",
+          "3": "Q"
+        },
+        "PVs": {
+          "1": 7,
+          "2": "2026-10-09 17:16:47.569",
+          "3": 192
+        },
+        "Objs": [
+          {
+            "N": "pub20"
+          },
+          {
+            "1": 3,
+            "N": "pub21"
+          }
+        ]
+      },
+      "template": {
+        "@#value.N": "@#value.1|PVs.1"
+      }
+    }
+  },
+  "routes": [
+    {
+      "name": "方案一",
+      "enabled": true,
+      "from": {
+        "broker": "IOServer转发",
+        "topics": [
+          "kingscada"
+        ],
+        "qos": 0
+      },
+      "targets": [
+        {
+          "broker": "本地EMQX",
+          "topic": "MES",
+          "qos": 0,
+          "retain": false,
+          "rules": [
+            "IOSERVER转发",
+            "IOSERVER直发",
+            "IOSERVER转发-副本"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "方案2",
+      "enabled": true,
+      "from": {
+        "broker": "本地EMQX",
+        "topics": [
+          "kingscada"
+        ],
+        "qos": 0
+      },
+      "targets": [
+        {
+          "broker": "虚拟机里的",
+          "topic": "MES",
+          "qos": 0,
+          "retain": false,
+          "client_id": "",
+          "rules": [
+            "IOSERVER转发",
+            "IOSERVER直发",
+            "IOSERVER转发-副本"
+          ]
+        }
+      ]
+    }
+  ],
+  "omit_missing": true,
+  "log_file": "kio_reshaper.log"
+}

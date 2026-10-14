@@ -1,0 +1,23 @@
+# 真配置含 broker 账号密码，绝不进版本库
+# 想跑起来就复制 reshape.example.json 为 reshape.json，填自己的凭据
+乾/2运势/reshape.json
+
+# 运行时产生的东西，不进版本库
+__pycache__/
+*.pyc
+*.log
+_t.log
+_webui_test.log
+
+# 坤 = 数据（报文分段 + 动作记录），是运行产物
+# 单独用 zip 快照备份；放进 git 会每次提交都全量变更
+坤/
+
+# 测试/排查时的临时文件
+_reverted.html
+_bug2.html
+_kio_rev.py
+_kio_keep.py
+_extracted.js
+_sizetest.db
+last_output.json

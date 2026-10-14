@@ -1,0 +1,2161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MQTT 转发</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#171d24; --panel2:#1e262f; --line:#2a343f;
+    --fg:#e6edf3; --dim:#8b9bab; --acc:#4da3ff; --ok:#3fb950; --warn:#d29922; --err:#f85149;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:14px/1.6 "Segoe UI",system-ui,-apple-system,"Microsoft YaHei",sans-serif}
+  header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;
+         flex-wrap:wrap;gap:18px;align-items:center;background:var(--panel)}
+  h1{margin:0;font-size:18px;font-weight:600;cursor:pointer;user-select:none;position:relative}
+  h1::after{content:"↻";font-size:13px;opacity:0;margin-left:9px;color:var(--dim);
+            transition:opacity .2s;font-weight:400}
+  h1:hover::after{opacity:1}
+  h1:active{opacity:.65}
+  .stats{display:flex;gap:22px;margin-left:auto;flex-wrap:wrap}
+  .stat{text-align:right}
+  .stat b{display:block;font-size:20px;font-weight:600;line-height:1.2}
+  .stat span{color:var(--dim);font-size:11px}
+  nav{display:flex;gap:2px;padding:0 24px;background:var(--panel);
+      border-bottom:1px solid var(--line);overflow-x:auto}
+  nav button{background:none;border:none;color:var(--dim);padding:12px 16px;
+             cursor:pointer;font-size:14px;border-bottom:2px solid transparent;white-space:nowrap}
+  nav button:hover{color:var(--fg)}
+  nav button.on{color:var(--acc);border-bottom-color:var(--acc)}
+  main{padding:20px 24px;max-width:1500px}
+  section{display:none} section.on{display:block}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+        padding:16px 18px;margin-bottom:18px}
+  .card h2{margin:0 0 14px;font-size:14px;font-weight:600;
+           display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .card h2 .tag{font-size:11px;color:var(--dim);font-weight:400}
+  table{width:100%;border-collapse:collapse;font-family:Consolas,monospace;font-size:12px}
+  th{text-align:left;color:var(--dim);font-weight:500;padding:7px 10px;
+     border-bottom:1px solid var(--line);font-family:inherit}
+  td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top;word-break:break-all}
+  tr:hover td{background:var(--panel2)}
+  #t-raw tr{cursor:pointer}
+  #t-raw tr.sel td{background:#1c3552}
+  #t-raw tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--acc)}
+  .pill{display:inline-block;padding:2px 9px;border-radius:11px;font-size:11px;
+        background:var(--panel2);color:var(--dim)}
+  .pill.ok {background:rgba(63,185,80,.16);color:#56d364}
+  .pill.err{background:rgba(248,81,73,.16);color:#ff7b72}
+  label{display:block;color:var(--dim);font-size:12px;margin:12px 0 5px}
+  input,textarea,select{width:100%;background:var(--bg);color:var(--fg);
+        border:1px solid var(--line);border-radius:7px;padding:9px 11px;
+        font-family:Consolas,monospace;font-size:13px}
+  input:focus,textarea:focus,select:focus{outline:none;border-color:var(--acc)}
+  textarea{resize:vertical;min-height:120px}
+  .row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .row2{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+  @media(max-width:800px){.row,.row2{grid-template-columns:1fr}}
+  .btn{background:var(--acc);color:#04121f;border:none;border-radius:7px;
+       padding:9px 16px;font-size:13px;font-weight:600;cursor:pointer}
+  .btn:hover{filter:brightness(1.12)}
+  .btn.sec{background:var(--panel2);color:var(--fg);border:1px solid var(--line);font-weight:500}
+  .btn.mini{padding:5px 11px;font-size:12px;font-weight:500}
+  .btn.del{background:rgba(248,81,73,.16);color:#ff7b72;border:1px solid rgba(248,81,73,.35)}
+  .actions{display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap}
+  .btn-group{display:flex;gap:10px;margin:18px 0 0;flex-wrap:wrap}
+  .btn-group .btn{flex:1 1 128px;text-align:center;white-space:nowrap}
+  .subnav{display:flex;gap:2px;margin:0 0 18px;background:var(--panel);
+          border:1px solid var(--line);border-radius:9px;padding:4px;width:fit-content}
+  .subnav button{background:none;border:none;color:var(--dim);padding:8px 20px;
+                 cursor:pointer;font-size:13px;border-radius:6px}
+  .subnav button:hover{color:var(--fg)}
+  .subnav button.on{background:var(--acc);color:#04121f;font-weight:600}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)} .dim{color:var(--dim)}
+  pre{margin:0;white-space:pre-wrap;word-break:break-all}
+  .feed{max-height:280px;overflow:auto}
+  .empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;
+               gap:10px;padding:42px 16px;color:var(--dim);text-align:center;min-height:210px}
+  .empty-state .face{font-size:38px;line-height:1;animation:bob 2.6s ease-in-out infinite}
+  .empty-state .msg{font-size:15px;color:var(--fg);font-weight:600}
+  .empty-state .sub{font-size:12px;opacity:.75}
+  @keyframes bob{0%,100%{transform:translateY(0) rotate(-3deg)}
+                 50%{transform:translateY(-7px) rotate(3deg)}}
+  .hint{color:var(--dim);font-size:12px;margin-top:8px}
+  .mono{font-family:Consolas,monospace;font-size:13px}
+  .ping{font-size:12px;margin-top:12px;padding:11px 13px;border-radius:8px;
+        border:1px solid var(--line);background:var(--panel2)}
+  .ping.ok {color:var(--ok); border-color:rgba(63,185,80,.42); background:rgba(63,185,80,.09)}
+  .ping.err{color:var(--err);border-color:rgba(248,81,73,.42); background:rgba(248,81,73,.09)}
+  .ping .sub{color:inherit;opacity:.72;font-family:Consolas,monospace;word-break:break-all}
+  .stat-pill{font-size:11px;font-weight:500;padding:2px 11px;border-radius:11px;letter-spacing:.4px}
+  .stat-pill.off {background:rgba(248,81,73,.16); color:#ff7b72}
+  .stat-pill.on  {background:rgba(63,185,80,.16); color:#56d364}
+  .stat-pill.busy{background:rgba(210,153,34,.18);color:#e3b341}
+  label.chk{display:flex;align-items:center;gap:8px;margin:12px 0 0;cursor:pointer;
+            color:var(--fg);font-size:13px}
+  label.chk input{width:auto;accent-color:var(--acc)}
+  .rt{border:1px solid var(--line);border-radius:10px;margin-bottom:16px;background:var(--panel2)}
+  .rt-h{display:flex;align-items:center;gap:12px;padding:12px 16px;
+        border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .rt-h input.rt-name{width:180px;font-weight:600;background:var(--bg)}
+  .rt-b{padding:14px 16px}
+  .lane{border-left:3px solid var(--acc);padding-left:14px;margin-bottom:14px}
+  .lane.to{border-left-color:var(--ok)}
+  .lane .lt{font-size:12px;color:var(--dim);margin-bottom:8px}
+  .log-line{font-family:Consolas,monospace;font-size:12px;padding:3px 0;
+            border-bottom:1px solid var(--line)}
+  #toast{position:fixed;right:22px;bottom:22px;background:var(--panel2);
+         border:1px solid var(--line);padding:12px 18px;border-radius:9px;
+         opacity:0;transition:.25s;pointer-events:none}
+  #toast.show{opacity:1}
+  code{background:var(--panel2);padding:1px 6px;border-radius:4px;font-size:12px}
+  .bkrow{display:flex;align-items:center;gap:12px;padding:11px 13px;
+         border:1px solid var(--line);border-radius:8px;margin-bottom:9px;
+         background:var(--panel2);cursor:pointer}
+  .bkrow:hover{border-color:#3a4854}
+  .bkrow.sel{border-color:var(--acc);background:#1c3552}
+  .bkmain{display:flex;align-items:center;gap:12px;flex-wrap:wrap;flex:1}
+  .bkacts{display:flex;gap:7px;flex:none}
+  .role{font-size:11px;padding:2px 9px;border-radius:11px;font-weight:600;flex:none}
+  .mask{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:50;
+        display:flex;align-items:center;justify-content:center;padding:24px}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+         width:min(1000px,100%);max-height:88vh;overflow:auto}
+  .modal-h{display:flex;align-items:center;gap:12px;padding:16px 20px;
+           border-bottom:1px solid var(--line)}
+  .modal-f{display:flex;gap:10px;justify-content:flex-end;padding:16px 20px;
+           border-top:1px solid var(--line)}
+  .wz-step{padding:18px 20px}
+  .wz-bar{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--dim)}
+  .wz-dot{width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;
+          justify-content:center;font-size:12px;background:var(--panel2);border:1px solid var(--line)}
+  .wz-dot.on{background:var(--acc);color:#04121f;border-color:var(--acc)}
+  .wz-dot.done{background:rgba(63,185,80,.22);color:#56d364;border-color:transparent}
+  .wz-arrow{color:var(--dim)}
+  .wz-target{border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:10px;
+             background:var(--panel2)}
+  .wz-rule{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border:1px solid var(--line);
+           border-radius:8px;margin-bottom:10px;background:var(--panel2);cursor:pointer}
+  .wz-rule.sel{border-color:var(--acc);background:#1c3552}
+  .wz-rule input{width:auto;margin-top:4px}
+  .wz-rule .rt-body{flex:1}
+  .rt-row{cursor:pointer}
+  .rt-row.sel td{background:#1c3552}
+  .rt-row.sel td:first-child{box-shadow:inset 3px 0 0 var(--acc)}
+  .rt-row.open td{background:#16273b}
+  .rt-detail>td{background:var(--panel2);border-top:1px solid var(--line)}
+  .rl-body{padding:14px 16px;border-left:3px solid var(--acc);border-radius:0 8px 8px 0}
+  .rl-body label{margin-top:10px}
+  .rl-tbl{width:100%;margin-top:6px;border-collapse:collapse}
+  .rl-tbl td{padding:6px 10px;border:1px solid var(--line);font-size:12px}
+  .rl-tbl tr:nth-child(odd) td{background:var(--bg)}
+  .rulepick{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+  .rulepick label{display:flex;align-items:center;gap:7px;margin:0;cursor:pointer;
+                  padding:7px 12px;border:1px solid var(--line);border-radius:7px;
+                  background:var(--panel2);font-size:12px}
+  .rulepick label:hover{border-color:var(--acc)}
+  .rulepick label.on{border-color:var(--acc);background:rgba(0,229,255,.10)}
+  .rulepick label.ro{cursor:default;opacity:.9}
+  .rulepick input{width:auto;accent-color:var(--acc)}
+  .rulepick .rn{font-weight:600}
+  .rulepick .rm{color:var(--dim);font-family:Consolas,monospace;font-size:11px}
+  .tag-ok{color:#56d364} .tag-off{color:var(--dim)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="app-title" title="点击重启服务" onclick="restart()">MQTT 转发</h1>
+  <div class="stats">
+    <div class="stat"><b id="s-in">0</b><span>收到</span></div>
+    <div class="stat"><b id="s-out" class="ok">0</b><span>转发</span></div>
+    <div class="stat"><b id="s-bad" class="warn">0</b><span>解析失败</span></div>
+    <div class="stat"><b id="s-drop" class="err">0</b><span>发布失败</span></div>
+    <div class="stat"><b id="stat-routes">0</b><span>方案</span></div>
+  </div>
+</header>
+
+<nav>
+  <button class="on" data-s="live">实时数据</button>
+  <button data-s="brokers">配置broker</button>
+  <button data-s="json">规则配置</button>
+  <button data-s="routes">方案配置</button>
+  <button data-s="test">模拟测试</button>
+  <button data-s="log">审计追踪</button>
+</nav>
+
+<main>
+
+<!-- ================= 实时数据 ================= -->
+<section id="s-live" class="on">
+  <div class="card">
+    <h2>方案状态</h2>
+    <div id="route-status" class="hint">载入中 ...</div>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <h2>原始报文 <span class="tag" id="c-raw">0 条</span><span class="tag">点击任意一行 →</span>
+        <select id="feed-route" style="margin-left:auto;width:180px;font-size:12px;padding:5px 8px"
+                onchange="switchFeedRoute(this.value)"></select>
+      </h2>
+      <div class="feed" id="raw-wrap">
+        <table id="raw-table"><thead><tr><th style="width:90px">时间</th><th>内容</th></tr></thead>
+        <tbody id="t-raw"></tbody></table>
+      </div>
+      <div class="empty-state" id="raw-empty">
+        <div class="face">🐟</div>
+        <div class="msg">摸鱼中…</div>
+        <div class="sub">一条报文都没来,我先歇会儿</div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>转换结果 <span class="tag" id="c-out">未选择</span></h2>
+      <div class="feed" id="out-wrap">
+        <table><thead><tr><th style="width:46px">#</th><th>内容</th></tr></thead>
+        <tbody id="t-out"></tbody></table>
+      </div>
+      <div class="empty-state" id="out-empty">
+        <div class="face">📣</div>
+        <div class="msg">举报:左边那个在摸鱼!</div>
+        <div class="sub">点左边任意一条,我就开工</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 配置broker ================= -->
+<section id="s-brokers">
+  <div class="grid">
+    <div class="card">
+      <h2><span id="b-title">新增 broker</span></h2>
+      <div class="row2">
+        <div><label>名称</label><input id="b-name" placeholder="例如 本地EMQX"></div>
+        <div><label>broker IP</label><input id="b-host" placeholder="127.0.0.1" onblur="splitHostPort()"
+             title="只填 IP 或域名，端口填右边那栏。整串填 IP:端口 也行，会自动拆开。"></div>
+      </div>
+      <div class="row2">
+        <div><label>端口号</label><input id="b-port" value="1883"></div>
+        <div><label>主题</label><input id="b-topic" placeholder="kingscada"></div>
+      </div>
+      <div class="row2">
+        <div><label>用户名</label><input id="b-user"></div>
+        <div><label>密码</label>
+          <div style="display:flex;gap:8px">
+            <input id="b-pass" type="password" placeholder="(留空表示不修改)" style="flex:1;min-width:0">
+            <button type="button" class="btn sec mini" id="b-eye" style="flex:none;min-width:44px"
+                    onclick="togglePwd()" title="显示密码">👁</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="btn-group">
+        <button class="btn sec" onclick="addBroker()">新增信息</button>
+        <button class="btn sec" onclick="saveBroker()">保存</button>
+        <button class="btn sec" id="btn-ping" onclick="testConn()">测试通路</button>
+        <button class="btn sec" onclick="readIoserver()">读取ioserver信息</button>
+      </div>
+
+      <div id="b-read"></div>
+
+      <div class="hint">
+        这里只存<b>连接信息</b>。谁监听、转发给谁，是<b>方案</b>的事 ——
+        同一个 broker 可以在方案甲里当监听、在方案乙里当目标。<br><br>
+        <b>新增信息</b> = 清空表单，准备录新条目<br>
+        <b>保存</b> = 存进右侧列表并清空表单<br>
+        <b>测试通路</b> = 用当前表单的 IP、端口、用户名、密码试连一次（随机 Client ID，不动已存条目）<br>
+        <b>读取ioserver信息</b> = 从 KingIOServer 配置文件取连接信息填入表单(含密码)<br>
+        <span class="dim">自动读取失败时,会提示具体缺哪个文件,并可手动选择文件识别。</span><br>
+        <span class="dim">改动会自动保存。改完连接信息后,点左上角「MQTT 转发」标题即可重启服务生效。</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>已存储 <span class="tag" id="b-count">0 个</span></h2>
+      <div id="broker-list"></div>
+      <div class="hint">方案里通过<b>名称</b>引用这里的 broker。点条目右侧的<b>编辑</b>会载入左边表单。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 方案配置 ================= -->
+<section id="s-routes">
+  <div class="actions">
+    <button class="btn" onclick="openWizard()">+ 新建方案</button>
+    <button class="btn sec" id="btn-run" onclick="runSelected()" disabled>▶ 运行方案</button>
+    <button class="btn sec" id="btn-stop" onclick="stopSelected()" disabled>■ 停止</button>
+    <button class="btn sec" id="btn-edit" onclick="editSelected()" disabled>编辑</button>
+    <button class="btn sec" id="btn-dup"  onclick="dupSelected()" disabled>复制</button>
+    <button class="btn del"  id="btn-del" onclick="delSelected()" disabled>删除</button>
+    <span class="hint" id="sel-hint" style="align-self:center">先在下方列表里选一个方案</span>
+  </div>
+
+  <div class="card">
+    <h2>方案列表 <span class="tag" id="rt-count">0 条</span></h2>
+    <table>
+      <thead><tr>
+        <th style="width:150px">方案名称</th>
+        <th style="width:92px">状态</th>
+        <th>监听 broker IP</th>
+        <th>监听主题</th>
+        <th>目标 broker IP</th>
+        <th>目标主题</th>
+      </tr></thead>
+      <tbody id="route-rows"></tbody>
+    </table>
+    <div class="hint">点一行选中,上方按钮才会亮起。<b>运行</b>=立即建立连接并开始转发,<b>停止</b>=断开该方案。</div>
+  </div>
+</section>
+
+<!-- ============ 新建 / 编辑方案 向导 ============ -->
+<div id="wizard" class="mask" style="display:none">
+  <div class="modal">
+    <div class="modal-h">
+      <b id="wz-title">新建方案</b>
+      <button class="btn sec mini" style="margin-left:auto" onclick="closeWizard()">关闭</button>
+    </div>
+
+    <!-- 步骤 1 -->
+    <div class="wz-step" id="wz1">
+      <div class="wz-bar">
+        <span class="wz-dot on">1</span> 选择监听与目标
+        <span class="wz-arrow">→</span>
+        <span class="wz-dot">2</span> 配置转发方案
+      </div>
+      <div class="grid" style="margin-top:14px">
+        <div class="lane">
+          <div class="lt">监听 · 只能选一个(数据从这里来)</div>
+          <label>broker</label>
+          <select id="wz-from-broker"></select>
+          <label>主题(逗号分隔可多个)</label>
+          <input id="wz-from-topics" placeholder="kingscada">
+          <label>方案名称</label>
+          <input id="wz-name" placeholder="例如 方案一">
+          <div class="hint">还没有可用的 broker?先去「配置broker」页<b>读取 IOServer 配置</b>。</div>
+        </div>
+        <div class="lane to">
+          <div class="lt">目标 · 可多选(转换结果同时发到这些地方)</div>
+          <div id="wz-targets"></div>
+          <button class="btn sec mini" style="margin-top:10px" onclick="wzAddTarget()">+ 添加一个目标</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 步骤 2 -->
+    <div class="wz-step" id="wz2" style="display:none">
+      <div class="wz-bar">
+        <span class="wz-dot done">1</span> 选择监听与目标
+        <span class="wz-arrow">→</span>
+        <span class="wz-dot on">2</span> 配置转发方案
+      </div>
+      <div class="hint" style="margin:12px 0">
+        为<b>每个目标</b>勾选要启用的转换规则 —— 不同目标可以转发成不同的格式。
+        一份报文可能有多种格式,哪条规则的「匹配条件」命中就用哪条转换。
+      </div>
+      <div id="wz-rules"></div>
+    </div>
+
+    <div class="modal-f">
+      <button class="btn sec" id="wz-prev" onclick="wzPrev()" style="visibility:hidden">← 上一步</button>
+      <button class="btn" id="wz-next" onclick="wzNext()">下一步 →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 规则配置 ================= -->
+<section id="s-json">
+  <div class="actions">
+    <button class="btn" onclick="newRule()">+ 新增规则</button>
+    <span class="hint" style="align-self:center">点规则行展开看内容，编辑/复制/删除在行尾</span>
+  </div>
+
+  <div class="card">
+    <h2>规则配置 <span class="tag" id="rl-count">0 条</span></h2>
+    <table>
+      <thead><tr>
+        <th style="width:210px">规则名称</th>
+        <th style="width:170px">匹配条件</th>
+        <th style="width:150px">扇出</th>
+        <th>输出字段</th>
+        <th style="width:190px"></th>
+      </tr></thead>
+      <tbody id="rule-rows"></tbody>
+    </table>
+    <div class="hint">点一行展开它的完整内容，再点一下或点「收起」就合上。要改动点「编辑」。</div>
+  </div>
+
+  <div class="card" id="rule-editor" style="display:none">
+    <h2><span id="rl-title">编辑规则</span></h2>
+    <div class="row2">
+      <div><label>规则名称</label><input id="rl-name" placeholder="例如 kxmqtt多对象拆分"></div>
+      <div><label>匹配条件 <span class="dim">为空则所有报文都用</span></label>
+        <input id="rl-match" placeholder="@PNs"
+          title="报文里必须能取到它，这条规则才生效。写 @ 路径，支持 | 多选，例如 @tag1|/tag1。留空 = 什么报文都用它。"></div>
+    </div>
+    <div class="row2">
+      <div><label>扇出(每个元素发一条) <span class="dim">留空则整包一条</span></label>
+        <input id="rl-each" placeholder="@Objs"
+          title="指向一个数组或对象，每个元素各发一条消息。例如 @Objs 把 3 个对象拆成 3 条。留空 = 整包转成一条。"></div>
+      <div><label>&nbsp;</label>
+        <div class="hint">
+          <b>取值语法</b>：<code>@PVs.1</code> 深入报文 · <code>@Objs.0.N</code> 数组按下标 ·
+          <code>@.</code> 报文本身 · <code>@#key</code>/<code>@#value</code> 当前元素的键/值 ·
+          <code>@#index</code> 当前下标 · <code>@#now</code> 当前时间 ·
+          <code>@#ts</code> 有效时间戳(含毫秒偏移) · <code>@a|b</code> 依次回落<br>
+          <b>字段名也能写 <code>@</code></b>：<code>@#value.N</code> 当字段名 =
+          直接用变量名当输出的键，例如输出 <code>{"pub11": 0}</code>
+        </div>
+      </div>
+    </div>
+
+    <label>示例报文(JSON) <span class="dim">可选 —— 模拟测试勾中这条规则时，会自动填进输入框</span></label>
+    <textarea id="rl-sample" rows="8" spellcheck="false"
+              placeholder='例如 {"tag1": 0, "tag2": 0, "tag3": 0}'></textarea>
+
+    <label>输出字段</label>
+    <div id="rl-fields"></div>
+    <button class="btn sec mini" style="margin-top:10px" onclick="addField()">+ 添加字段</button>
+
+    <div class="actions" style="margin:18px 0 0">
+      <button class="btn" onclick="saveRule()">保存规则</button>
+      <button class="btn sec" onclick="cancelRule()">取消</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>原始配置文件</h2>
+    <label>reshape.json <span class="dim">失焦后自动应用并保存</span></label>
+    <textarea id="rawcfg" rows="14" spellcheck="false" onblur="applyRaw()"></textarea>
+    <div class="actions" style="margin:14px 0 0">
+      <button class="btn sec" onclick="applyRaw()">立即应用到表单</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 模拟测试 ================= -->
+<section id="s-test">
+  <div class="subnav">
+    <button class="on" data-t="off" onclick="testTab('off')">离线转换测试</button>
+    <button data-t="on" onclick="testTab('on')">在线转换测试</button>
+  </div>
+
+  <!-- ===== 离线：只转换，不碰 broker ===== -->
+  <div id="test-off">
+    <div class="card">
+      <h2>离线转换测试 <span class="tag">只转换，不发布</span></h2>
+      <div class="hint">粘贴一条原始报文，选<b>规则</b>算出结果。不连 broker、不发消息，适合调模板时反复试。</div>
+      <div class="row2">
+        <div><label>选择规则 <span class="dim">可多选，按勾选顺序套用</span></label>
+          <div id="t-rules" class="rulepick"></div>
+          <div style="margin-top:8px;display:flex;gap:8px">
+            <button class="btn sec mini" onclick="pickAllRules('t-rules')">全选</button>
+            <button class="btn sec mini" onclick="clearRules('t-rules')">清空</button>
+          </div>
+        </div>
+        <div><label>&nbsp;</label><div class="hint" id="t-ruleinfo"></div></div>
+      </div>
+      <label>输入报文(JSON)</label>
+      <textarea id="t-in" rows="12" spellcheck="false">{
+  "PNs": {"1": "V", "2": "T", "3": "Q"},
+  "PVs": {"1": 1616, "2": "2026-10-09 17:16:47.569", "3": 192},
+  "Objs": [{"N": "pub10"}, {"1": 0, "N": "pub11"}, {"1": 23, "N": "pub17"}]
+}</textarea>
+      <div class="actions" style="margin:14px 0 0"><button class="btn" onclick="runTest()">离线试算</button></div>
+    </div>
+    <div class="card">
+      <h2>输出 <span class="tag" id="t-count"></span></h2>
+      <div class="feed"><table><thead><tr><th style="width:50px">#</th><th>内容</th></tr></thead>
+      <tbody id="t-out2"></tbody></table></div>
+      <pre id="t-err" class="err"></pre>
+    </div>
+  </div>
+
+  <!-- ===== 在线：真发真收，走完整条链路 ===== -->
+  <div id="test-on" style="display:none">
+    <div class="card">
+      <h2>在线转换测试 <span class="tag">真发真收</span></h2>
+      <div class="hint">
+        把报文<b>真的发到方案的监听主题</b>，走完整条转发链路，再把<b>目标主题实际收到的东西</b>抓回来。<br>
+        <span class="dim">要发到 MES 的东西以这里抓到的为准，离线算的只是模板结果。</span>
+      </div>
+      <div class="row2">
+        <div><label>使用方案 <span class="dim">决定发到哪、从哪抓</span></label>
+          <select id="lt-route" onchange="liveInfo()"></select>
+          <label style="margin-top:12px">本方案用的规则 <span class="dim">在线测试按这个转，只读</span></label>
+          <div id="lt-rules" class="rulepick"></div>
+        </div>
+        <div><label>&nbsp;</label><div class="hint" id="lt-info"></div></div>
+      </div>
+      <label>发送报文(JSON)</label>
+      <textarea id="lt-in" rows="10" spellcheck="false">{
+  "PNs": {"1": "V", "2": "T", "3": "Q"},
+  "PVs": {"1": 1616, "2": "2026-10-09 17:16:47.569", "3": 192},
+  "Objs": [{"N": "pub10"}, {"1": 0, "N": "pub11"}, {"1": 23, "N": "pub17"}]
+}</textarea>
+      <div class="row2">
+        <div><label>抓取等待(秒)</label><input id="lt-wait" type="number" value="2.5" min="0.5" step="0.5"></div>
+        <div><label>&nbsp;</label>
+          <button class="btn" onclick="runLiveTest()">发送并抓取</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>实际收到 <span class="tag" id="lt-count"></span></h2>
+      <div class="hint" id="lt-result"></div>
+      <div class="feed" style="max-height:420px">
+        <table><thead><tr><th style="width:50px">#</th><th>目标主题</th><th>内容</th></tr></thead>
+        <tbody id="lt-out"></tbody></table>
+      </div>
+      <pre id="lt-err" class="err"></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 审计追踪 ================= -->
+<section id="s-log">
+  <div class="subnav">
+    <button class="on" data-t="msg" onclick="auditTab('msg')">报文记录</button>
+    <button data-t="evt" onclick="auditTab('evt')">动作记录</button>
+    <button data-t="store" onclick="auditTab('store')">存储管理</button>
+  </div>
+
+  <!-- ===== 报文记录 ===== -->
+  <div id="audit-msg">
+    <div class="card">
+      <h2>查询条件 <span class="tag">报文</span></h2>
+      <div class="row">
+        <div><label>方案</label><select id="h-route"><option value="">全部</option></select></div>
+        <div><label>方向</label>
+          <select id="h-dir">
+            <option value="">全部</option>
+            <option value="in">原始报文</option>
+            <option value="out">转换结果</option>
+          </select>
+        </div>
+        <div><label>关键词(内容模糊匹配)</label><input id="h-kw" placeholder="例如 pub10 / 1616"></div>
+      </div>
+      <div class="row">
+        <div><label>开始时间</label><input id="h-from" placeholder="2026-10-10 00:00:00"></div>
+        <div><label>结束时间</label><input id="h-to" placeholder="2026-10-10 23:59:59"></div>
+        <div><label>&nbsp;</label>
+          <div style="display:flex;gap:8px">
+            <button class="btn" onclick="loadHistory()">查询</button>
+            <button class="btn sec" onclick="exportCsv()">导出 CSV</button>
+            <button class="btn sec" onclick="resetHistory()">重置</button>
+          </div>
+        </div>
+      </div>
+      <div class="hint" id="h-count">共 0 条</div>
+    </div>
+
+    <div class="card">
+      <h2>报文记录 <span class="tag">SQLite 落盘,重启不丢</span></h2>
+      <div class="feed" style="max-height:460px">
+        <table><thead><tr>
+          <th style="width:130px">时间</th><th style="width:110px">方案</th>
+          <th style="width:78px">方向</th><th style="width:96px">主题</th><th>内容</th>
+        </tr></thead><tbody id="h-rows"></tbody></table>
+      </div>
+      <div class="actions" style="margin:14px 0 0">
+        <button class="btn sec" onclick="loadHistory(true)">加载更早的</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 动作记录 ===== -->
+  <div id="audit-evt" style="display:none">
+    <div class="card">
+      <h2>查询条件 <span class="tag">动作</span></h2>
+      <div class="row">
+        <div><label>类别</label>
+          <select id="e-kind">
+            <option value="">全部</option>
+            <option value="broker">broker</option>
+            <option value="方案">方案</option>
+            <option value="规则配置">规则配置</option>
+            <option value="数据库">数据库</option>
+            <option value="连接">连接</option>
+            <option value="系统">系统</option>
+          </select>
+        </div>
+        <div><label>动作</label>
+          <select id="e-op">
+            <option value="">全部</option>
+            <option value="新增">新增</option>
+            <option value="修改">修改</option>
+            <option value="删除">删除</option>
+            <option value="清除">清除</option>
+            <option value="连接">连接</option>
+            <option value="断开">断开</option>
+            <option value="启动">启动</option>
+            <option value="失败">失败</option>
+          </select>
+        </div>
+        <div><label>级别</label>
+          <select id="e-level">
+            <option value="">全部</option>
+            <option value="info">info</option>
+            <option value="warn">warn</option>
+            <option value="error">error</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div><label>关键词</label><input id="e-kw" placeholder="对象名或内容，例如 本地EMQX / 方案一"></div>
+        <div><label>开始时间</label><input id="e-from" placeholder="2026-10-10 00:00:00"></div>
+        <div><label>结束时间</label><input id="e-to" placeholder="2026-10-10 23:59:59"></div>
+      </div>
+      <div class="row">
+        <div><label>&nbsp;</label>
+          <div style="display:flex;gap:8px">
+            <button class="btn" onclick="loadEvents()">查询</button>
+            <button class="btn sec" onclick="resetEvents()">重置</button>
+          </div>
+        </div>
+        <div><label>&nbsp;</label>
+          <div class="hint">配置的<b>增删改</b>和连接运行事件都记在这里。<br>
+          broker、方案、规则配置、数据库的每一处改动都会单独留一条。</div>
+        </div>
+      </div>
+      <div class="hint" id="e-count">共 0 条</div>
+    </div>
+
+    <div class="card">
+      <h2>动作记录 <span class="tag">增删改 / 连接 / 运行</span></h2>
+      <div class="feed" style="max-height:520px">
+        <table><thead><tr>
+          <th style="width:130px">时间</th><th style="width:62px">级别</th>
+          <th style="width:78px">类别</th><th style="width:62px">动作</th>
+          <th style="width:130px">对象</th><th>内容</th>
+        </tr></thead><tbody id="e-rows"></tbody></table>
+      </div>
+      <div class="actions" style="margin:14px 0 0">
+        <button class="btn sec" onclick="loadEvents(true)">加载更早的</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 存储管理 ===== -->
+  <div id="audit-store" style="display:none">
+
+    <div class="card">
+      <h2>存储上限与分段 <span class="tag">超过上限或跨天即开新库</span></h2>
+      <div class="row2">
+        <div><label>存储上限(MB)</label>
+          <input id="st-max" type="number" min="1" step="10"></div>
+        <div><label>分段周期(天)</label>
+          <input id="st-days" type="number" min="1" step="1"></div>
+      </div>
+      <div class="btn-group">
+        <button class="btn" onclick="saveStorageSettings()">保存设置</button>
+      </div>
+      <div class="hint">
+        <b>存储上限</b> = 单个数据库文件的大小上限，写满了就<b>自动开一个新的库</b>接着写<br>
+        <b>分段周期</b> = 每隔几天开一个新库（1 = 一天一个新库）<br>
+        <span class="dim">两个条件谁先到谁触发。文件名固定 <b>yyyy-mm-dd-序号.db</b>，同一天写满几个就编到几号。</span><br>
+        <span class="dim">旧数据<b>不自动删</b>，库多了去下面手动删。</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>手动清除 <span class="tag">删了不可恢复</span></h2>
+      <div class="row">
+        <div><label>开始时间</label><input id="st-from" placeholder="2026-10-10 00:00:00"></div>
+        <div><label>结束时间</label><input id="st-to" placeholder="2026-10-10 23:59:59"></div>
+        <div><label>&nbsp;</label>
+          <button class="btn sec" onclick="purgeRange()">清除这个时间段</button>
+        </div>
+      </div>
+      <div class="btn-group">
+        <button class="btn del" onclick="purgeAll()">清空全部</button>
+        <button class="btn sec" onclick="purgeOldest()">删最旧
+          <input id="st-n" type="number" value="3" min="1" style="width:56px;margin:0 4px"> 个库</button>
+        <button class="btn sec" onclick="clearCurrent()">清空当前库</button>
+      </div>
+      <div class="hint">
+        <b>清空全部</b> = 删掉所有数据库文件，从头再来<br>
+        <b>删最旧 N 个库</b> = 快速腾空间，从最老的开始删<br>
+        <b>清空当前库</b> = 只清正在写入的那个，文件保留继续用<br>
+        <b>清除时间段</b> = 按时间删；某个库被清空时连文件一起删掉
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>报文数据库文件 <span class="tag" id="st-sum">载入中 …</span></h2>
+      <div class="feed" style="max-height:420px">
+        <table><thead><tr>
+          <th style="width:180px">文件名</th>
+          <th style="width:82px">大小</th>
+          <th style="width:100px">报文</th>
+          <th style="width:158px">数据时间范围</th>
+          <th style="width:104px">状态</th>
+          <th>操作</th>
+        </tr></thead><tbody id="st-rows"></tbody></table>
+      </div>
+      <div class="hint">
+        存放目录 <b id="st-dir">-</b><br>
+        <b>分段分时只针对报文记录</b>。动作记录单独存一个文件、不分段，见下。<br>
+        <b>连接</b> = 让这个库的数据进入「报文记录」的查询范围<br>
+        <b>断开</b> = 查询不再命中它，并释放文件句柄（方便你搬走或备份）<br>
+        <span class="dim">正在写入的那个库始终连接、不可断开也不可删除；要删等它切段之后。</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>动作数据库 <span class="tag">单文件 · 不分段</span></h2>
+      <div class="hint" id="st-actions">载入中 …</div>
+      <div class="btn-group">
+        <button class="btn del" onclick="clearActions()">清空动作记录</button>
+      </div>
+      <div class="hint">
+        动作记录（增删改 + 连接运行）不参与分段，单独一个文件，方便长期回查。<br>
+        <span class="dim">清空后不可恢复，但不影响报文记录。</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+<!-- ============ 手动选择配置文件 ============ -->
+<div id="filedlg" class="mask" style="display:none">
+  <div class="modal" style="width:min(620px,100%)">
+    <div class="modal-h">
+      <b>手动选择配置文件识别</b>
+      <button class="btn sec mini" style="margin-left:auto" onclick="closeFileDlg()">关闭</button>
+    </div>
+    <div class="wz-step">
+      <div class="hint" style="margin:0 0 14px">
+        自动读取不到时,可以自己挑文件。支持两种格式,选中后自动识别并填入左侧表单:
+        <br>· <code>MQTTConfig.JSON</code> —— kxMQTT 转发配置(方法二)
+        <br>· <code>MQTT_Request.ini</code> —— 驱动 PUB 配置(方法一)
+      </div>
+      <label>选择文件</label>
+      <input type="file" id="file-pick" accept=".ini,.json,.JSON,.txt" onchange="parsePickedFile()">
+      <div id="file-preview" class="hint" style="margin-top:14px;white-space:pre-wrap"></div>
+    </div>
+    <div class="modal-f">
+      <button class="btn sec" onclick="closeFileDlg()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmtT = ts => new Date(ts*1000).toLocaleTimeString('zh-CN',{hour12:false}) +
+                  '.' + String(Math.floor((ts%1)*1000)).padStart(3,'0');
+function toast(m){const e=$('#toast');e.textContent=m;e.classList.add('show');
+  setTimeout(()=>e.classList.remove('show'),2200)}
+async function j(u,opt){const r=await fetch(u,opt);return r.json()}
+
+let EDIT = {brokers:{}, routes:[], rule_library:{}};
+let selId = null;
+
+function go(name){
+  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('section').forEach(x=>x.classList.remove('on'));
+  const btn=document.querySelector(`nav button[data-s="${name}"]`);
+  if(btn) btn.classList.add('on');
+  const sec=$('#s-'+name); if(sec) sec.classList.add('on');
+  if(name==='log'){ fillHistoryRoutes(); loadHistory(); loadEvents(); }
+  if(name==='brokers'||name==='routes') loadCfg();
+  if(name==='json') loadCfg();
+  if(name==='test') fillRouteSelect();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.s));
+
+/* ---------------- status ---------------- */
+function setStat(el,connected,lastTs){
+  if(!el) return;
+  if(!connected){el.textContent='离线';el.className='stat-pill off';return}
+  const age = lastTs ? (Date.now()/1000-lastTs) : 9999;
+  if(age<=3){el.textContent='作业中';el.className='stat-pill busy'}
+  else{el.textContent='在线';el.className='stat-pill on'}
+}
+
+async function loadStatus(){
+  try{
+    const s = await j('/api/status');
+    let in_=0,out=0,bad=0,drop=0;
+    (s.routes||[]).forEach(r=>{
+      in_+=r.stats.in; out+=r.stats.out; bad+=r.stats.bad; drop+=r.stats.drop;
+    });
+    $('#s-in').textContent=in_; $('#s-out').textContent=out;
+    $('#s-bad').textContent=bad; $('#s-drop').textContent=drop;
+    $('#stat-routes').textContent=(s.routes||[]).length;
+
+    $('#route-status').innerHTML = (s.routes||[]).length ? (s.routes||[]).map(r=>`
+      <div style="display:flex;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid var(--line);flex-wrap:wrap">
+        <b style="min-width:110px">${esc(r.name)}</b>
+        <span class="pill">监听 ${esc((r.topics||[]).join(' , '))}</span>
+        <span class="dim">→</span>
+        <span class="pill">目标 ${esc((r.dst_topics||[]).join(' , '))}</span>
+        <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <span class="dim" style="font-size:11px">收 ${r.stats.in} / 发 ${r.stats.out}</span>
+          <span class="stat-pill" data-role="s" data-i="${r.idx}">-</span>
+          <span class="stat-pill" data-role="d" data-i="${r.idx}">-</span>
+        </span>
+      </div>`).join('') : '暂无方案';
+    (s.routes||[]).forEach(r=>{
+      setStat(document.querySelector(`.stat-pill[data-role="s"][data-i="${r.idx}"]`),r.src_connected,r.src_last_ts);
+      setStat(document.querySelector(`.stat-pill[data-role="d"][data-i="${r.idx}"]`),r.dst_connected,r.dst_last_ts);
+    });
+    fillFeedRouteSelect(s.routes);
+    if((s.routes||[]).length && feedRoute==null) feedRoute = s.routes[0].idx;
+  }catch(e){}
+}
+
+/* ---------------- feed ---------------- */
+function switchFeedRoute(v){
+  feedRoute = +v || 0;
+  selId = null;
+  loadFeed();
+}
+
+function fillFeedRouteSelect(routes){
+  const sel = $('#feed-route'); if(!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = (routes||[]).map(r=>`<option value="${r.idx}">${esc(r.name)}</option>`).join('')
+               || '<option value="0">无方案</option>';
+  const still = (routes||[]).some(r=>String(r.idx)===String(cur));
+  if(cur!=='' && still) sel.value = cur;
+  else if((routes||[]).length) sel.value = String((routes||[])[0].idx);
+  if(sel.value!==undefined && sel.value!=='') feedRoute = +sel.value || 0;
+}
+
+function showOutEmpty(mode){
+  const box = $('#out-empty'); if(!box) return;
+  const face = box.querySelector('.face');
+  const msg  = box.querySelector('.msg');
+  const sub  = box.querySelector('.sub');
+  if(mode==='left-slack'){
+    face.textContent='📣'; msg.textContent='举报:左边那个在摸鱼!';
+    sub.textContent='它一条报文都没收到,不关我的事';
+  }else if(mode==='no-pick'){
+    face.textContent='👆'; msg.textContent='还没选中左边的报文';
+    sub.textContent='点任意一行,我就开工';
+  }else{
+    face.textContent='🫥'; msg.textContent='这条没转出东西';
+    sub.textContent='可能没命中任何转换规则';
+  }
+  box.style.display='flex';
+  $('#out-wrap').style.display='none';
+}
+function hideOutEmpty(){
+  const box=$('#out-empty'); if(box) box.style.display='none';
+  const w=$('#out-wrap'); if(w) w.style.display='block';
+}
+
+async function loadFeed(){
+  try{
+    const rows = await j('/api/feed?route='+feedRoute);
+    $('#c-raw').textContent = rows.length+' 条';
+    // 没数据时让左边去摸鱼
+    $('#raw-empty').style.display = rows.length ? 'none' : 'flex';
+    $('#raw-wrap').style.display  = rows.length ? 'block' : 'none';
+    if(!rows.length) showOutEmpty('left-slack');
+    $('#t-raw').innerHTML = rows.slice(-80).reverse().map(r=>
+      `<tr data-id="${esc(r.id)}" class="${r.id===selId?'sel':''}">
+         <td class="dim">${fmtT(r.t)}</td><td><pre>${esc(r.text.slice(0,300))}</pre></td></tr>`).join('');
+    document.querySelectorAll('#t-raw tr').forEach(tr=>tr.onclick=()=>selectRaw(tr.dataset.id));
+    const still = selId!==null && rows.some(r=>r.id===selId);
+    if(rows.length && (selId===null || !still)) selectRaw(rows[rows.length-1].id);
+    else if(still) selectRaw(selId);
+  }catch(e){}
+}
+
+async function selectRaw(id){
+  selId=id;
+  document.querySelectorAll('#t-raw tr').forEach(tr=>tr.classList.toggle('sel',tr.dataset.id===id));
+  try{
+    const outs = await j('/api/pair?route='+feedRoute+'&id='+encodeURIComponent(id));
+    if(!outs.length){
+      $('#c-out').textContent = '无输出';
+      showOutEmpty('no-output');
+      return;
+    }
+    hideOutEmpty();
+    $('#c-out').textContent = outs.length+' 条';
+    $('#t-out').innerHTML = outs.map((r,i)=>
+      `<tr><td class="dim">${i+1}</td><td><pre>${esc(r.text)}</pre></td></tr>`).join('');
+  }catch(e){}
+}
+
+/* ---------------- config ---------------- */
+async function loadCfg(){
+  await flushPending();   // 先落盘再拉，别让服务端旧数据盖掉刚改的东西
+  try{
+    const r = await j('/api/config');
+    EDIT.brokers = r.brokers || {};
+    EDIT.routes  = r.routes  || [];
+    EDIT.rule_library = (r.config||{}).rule_library || {};
+    $('#rawcfg').value = JSON.stringify(r.config||{}, null, 2);
+    renderBrokerList(); renderRoutes(); renderRuleLib(); fillRouteSelect();
+  }catch(e){}
+}
+
+let editKey = null;   // null = 新增, 否则正在编辑的 broker 名称
+
+// 密码明暗切换：打错了当场能看见，别等连接失败才发现少个字符
+function togglePwd(){
+  const inp = $('#b-pass'), btn = $('#b-eye');
+  if(!inp || !btn) return;
+  const show = inp.type === 'password';
+  inp.type = show ? 'text' : 'password';
+  btn.textContent = show ? '🙈' : '👁';
+  btn.title = show ? '隐藏密码' : '显示密码';
+}
+
+// 「broker IP」栏里填了 IP:端口 就自动拆开——端口该填在旁边的端口号栏，
+// 整串当域名解析必然失败（提示是「无法解析」，看着像网络问题，其实是填法）
+function splitHostPort(){
+  const hostEl = $('#b-host'), portEl = $('#b-port');
+  let h = hostEl.value.trim();
+  const m = /^(.+):(\d{1,5})$/.exec(h);
+  if(m && h.indexOf(']') === -1){          // 不碰 IPv6 的 [::1]:1883
+    hostEl.value = m[1];
+    if(!portEl.value.trim()) portEl.value = m[2];
+    toast('已把端口 ' + m[2] + ' 拆到「端口号」栏');
+  }
+}
+
+function renderBrokerList(){
+  const names = Object.keys(EDIT.brokers);
+  $('#b-count').textContent = names.length + ' 个';
+  $('#broker-list').innerHTML = names.length ? names.map((n,i)=>{
+    const b = EDIT.brokers[n]||{};
+    return `<div class="bkrow${editKey===n?' sel':''}" data-i="${i}">
+      <div class="bkmain">
+        <b>${esc(n)}</b>
+        <span class="mono dim">${esc(b.host||'-')} : ${esc(b.port||'-')}</span>
+        <span class="pill">${esc(b.username||'未设置账号')}</span>
+        <span class="pill ${(b.has_password||b.password)?'ok':'err'}">${(b.has_password||b.password)?'已设密码':'无密码'}</span>
+        <span class="pill">主题 ${esc(b.topic||'-')}</span>
+      </div>
+      <div class="bkacts">
+        <button class="btn sec mini" data-act="edit">编辑</button>
+        <button class="btn del mini" data-act="del">删除</button>
+      </div>
+    </div>`;
+  }).join('') : '<div class="hint">还没有 broker。点左边「新增信息」开始录入。</div>';
+
+  $('#broker-list').querySelectorAll('.bkrow').forEach(row=>{
+    const n = names[+row.dataset.i];
+    row.querySelector('[data-act="edit"]').onclick = ()=>editBroker(n);
+    row.querySelector('[data-act="del"]').onclick  = ()=>delBroker(n);
+    row.onclick = (e)=>{ if(e.target.dataset.act===undefined) editBroker(n) };
+  });
+}
+
+function addBroker(){
+  editKey = null;
+  $('#b-title').textContent = '新增 broker';
+  $('#b-name').value = '';
+  $('#b-host').value = '';
+  $('#b-port').value = 1883;
+  $('#b-user').value = '';
+  $('#b-pass').value = '';
+  $('#b-topic').value = '';
+  $('#b-read').innerHTML = '';
+  renderBrokerList();
+  $('#b-name').focus();
+}
+
+async function editBroker(name){
+  const b = EDIT.brokers[name] || {};
+  editKey = name;
+  $('#b-title').textContent = '编辑 broker · ' + name;
+  $('#b-name').value  = name;
+  $('#b-host').value  = b.host || '';
+  $('#b-port').value  = b.port || 1883;
+  $('#b-user').value  = b.username || '';
+  $('#b-pass').value  = '';
+  $('#b-topic').value = b.topic || '';
+  $('#b-read').innerHTML = '';
+  renderBrokerList();
+  $('#b-name').focus();
+  // 按需取回密码填入表单(仅在编辑时拉一次)
+  try{
+    const d = await j('/api/broker?name='+encodeURIComponent(name));
+    if(d && d.broker) $('#b-pass').value = d.broker.password || '';
+  }catch(e){}
+}
+
+async function saveBroker(){
+  splitHostPort();                 // IP:端口 整串填进来的先拆开
+  const name = $('#b-name').value.trim();
+  if(!name) return toast('请填写名称');
+  const host = $('#b-host').value.trim();
+  if(!host) return toast('请填写 broker IP');
+
+  const b = EDIT.brokers[editKey] || EDIT.brokers[name] || {};
+  // 只存连接信息。「监听 / 目标」是方案里的角色，不属于 broker 本身——
+  // 同一个 broker 可以在方案甲里当监听、在方案乙里当目标。
+  delete b.role;
+  delete b.client_id;
+  b.host = host;
+  b.port = parseInt($('#b-port').value) || 1883;
+  b.username = $('#b-user').value;
+  b.topic = $('#b-topic').value.trim();
+  if($('#b-pass').value) b.password = $('#b-pass').value;
+
+  // renaming: move the entry and re-point every route that used the old name
+  if(editKey && editKey !== name){
+    const nb = {};
+    Object.keys(EDIT.brokers).forEach(k=> nb[k===editKey ? name : k] = EDIT.brokers[k]);
+    EDIT.brokers = nb;
+    EDIT.routes.forEach(r=>{
+      if(r.from && r.from.broker===editKey) r.from.broker = name;
+      if(r.to && r.to.broker===editKey)     r.to.broker   = name;
+      (r.targets||[]).forEach(t=>{ if(t.broker===editKey) t.broker = name });
+    });
+    renderRoutes();
+  }
+  EDIT.brokers[name] = b;
+  renderBrokerList();
+  addBroker();          // 清空表单,回到新增状态
+  await persist(false);
+  toast('已保存到「'+(role==='listen'?'监听':'目标')+'」并写入配置文件 · '+name);
+}
+
+function delBroker(name){
+  if(!window.confirm('删除 broker「'+name+'」?\n(引用它的方案需要改指到别的 broker)')) return;
+  delete EDIT.brokers[name];
+  if(editKey === name) addBroker();
+  renderBrokerList(); renderRoutes();
+  persistSoon();
+  toast('已删除「'+name+'」');
+}
+
+/* -------- 测试通路 -------- */
+async function testConn(){
+  splitHostPort();                 // IP:端口 整串填进来的先拆开
+  const host = $('#b-host').value.trim();
+  if(!host){ toast('请先填 broker IP'); $('#b-host').focus(); return }
+  const port = parseInt($('#b-port').value) || 1883;
+  const user = $('#b-user').value.trim();
+  let pass = $('#b-pass').value;
+  // 密码留空表示"不修改":编辑已存条目时,取存储里的密码一起去试连
+  if(!pass && editKey){
+    try{
+      const d = await j('/api/broker?name='+encodeURIComponent(editKey));
+      if(d && d.broker) pass = d.broker.password || '';
+    }catch(e){}
+  }
+
+  const btn = $('#btn-ping');
+  if(btn){ btn.disabled = true; btn.textContent = '测试中…' }
+  $('#b-read').innerHTML = '<div class="ping">正在连接 '+esc(host)+':'+esc(port)+' …</div>';
+
+  let r;
+  try{
+    r = await j('/api/ping', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({host:host, port:port, username:user, password:pass, timeout:5})
+    });
+  }catch(e){
+    r = {ok:false, message:'请求失败: '+(e.message||e)};
+  }
+  if(btn){ btn.disabled = false; btn.textContent = '测试通路' }
+
+  const ok  = !!r.ok;
+  const why = r.message || r.error || (ok ? '连接成功' : '未知原因');
+  $('#b-read').innerHTML =
+    '<div class="ping '+(ok?'ok':'err')+'">'+
+      '<b>'+(ok?'🟢 通路正常':'🔴 通路不通')+'</b> — '+esc(why)+
+      '<div class="sub">'+esc(host)+':'+esc(port)+
+        (user ? ' · 用户 '+esc(user) : ' · 匿名')+
+        ' · 耗时 '+(r.elapsed_ms!=null ? esc(String(r.elapsed_ms)) : '-')+' ms'+
+        ' · 随机 ID '+esc(r.client_id||'-')+
+        (r.code!=null && r.code!==0 ? ' · CONNACK 码 '+esc(String(r.code)) : '')+
+      '</div>'+
+    '</div>';
+  toast(ok ? '通路正常' : '通路不通 — '+why);
+}
+
+/* -------- 读取 KingIOServer 配置 -------- */
+function fillFormFromMethod(m){
+  editKey = null;
+  $('#b-title').textContent = '新增信息 · 来自 ' + m.name;
+  $('#b-name').value  = m.name === 'kxmqtt-forward' ? 'IOServer转发' : 'IOServer_PUB';
+  $('#b-host').value  = m.host || '';
+  $('#b-port').value  = m.port || 1883;
+  $('#b-user').value  = m.username || '';
+  $('#b-pass').value  = m.password || '';
+  $('#b-topic').value = m.topic || '';
+  renderBrokerList();
+  toast('已填入 ' + m.name + ' 的连接信息');
+}
+
+function openFileDlg(){ $('#file-preview').textContent=''; $('#file-pick').value=''; $('#filedlg').style.display='flex' }
+function closeFileDlg(){ $('#filedlg').style.display='none' }
+
+function parsePickedFile(){
+  const f = $('#file-pick').files[0];
+  const box = $('#file-preview');
+  if(!f){ box.textContent=''; return }
+  const rd = new FileReader();
+  rd.onload = ()=>{
+    const text = String(rd.result||'');
+    try{
+      let m = null;
+      if(/^\s*\{/.test(text)){
+        const jj = JSON.parse(text);
+        const conn = jj.ConnectConfig || {};
+        const sec  = jj.SecurityProperty || {};
+        let host = String(conn.ServerURL||'').replace(/^[a-z0-9]+:\/\//i,'').split('/')[0];
+        let port = conn.Port || 1883;
+        if(host.includes(':')){ const p=host.split(':'); host=p[0]; port=parseInt(p[1])||port }
+        m = { name:'kxmqtt-forward', host:host, port:port,
+              username:sec.UserName||'', password:sec.Password||'',
+              topic:conn.SubscribeTopic||'' };
+      }else{
+        const kv = {};
+        text.split(/\r?\n/).forEach(line=>{
+          const s=line.trim();
+          if(!s || s.startsWith('#') || s.startsWith(';')) return;
+          const i=s.indexOf('='); if(i<0) return;
+          const k=s.slice(0,i).trim(), v=s.slice(i+1).trim();
+          if(k && v && !(k in kv)) kv[k]=v;
+        });
+        if(!kv['0_DomainName']) throw new Error('文件里没有 0_DomainName,不像是 MQTT_Request.ini');
+        let host = kv['0_DomainName'], port = 1883;
+        const mm = /:(\d{2,5})\s*$/.exec(host);
+        if(mm){ port = parseInt(mm[1]); host = host.slice(0, mm.index) }
+        const pub = Object.keys(kv).filter(k=>/^\d+_\d+PUB$/.test(k) && kv[k]);
+        m = { name:'mqtt-request-pub', host:host, port:port,
+              username:kv['0_UserName']||'', password:kv['0_PassWord']||'',
+              topic: (pub.length ? kv[pub[0]] : '') };
+      }
+      box.innerHTML = '识别成功:<b style="color:var(--ok)">'+esc(m.name)+'</b><br>'+
+        esc(m.host||'-')+' : '+esc(m.port||'-')+'    主题 '+esc(m.topic||'-')+
+        '    用户 '+esc(m.username||'-')+'<br><span class="dim">已填入左侧表单</span>';
+      fillFormFromMethod(m);
+    }catch(e){
+      box.innerHTML = '<span class="err">识别失败: '+esc(e.message||e)+'</span><br>'+
+        '<span class="dim">确认这是 MQTTConfig.JSON 或 MQTT_Request.ini</span>';
+    }
+  };
+  rd.onerror = ()=>{ box.innerHTML = '<span class="err">文件读取失败</span>' };
+  rd.readAsText(f, 'utf-8');
+}
+
+async function readIoserver(){
+  let r = null;
+  try{
+    r = await j('/api/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+  }catch(e){ r = {error: (e.message||e)} }
+
+  const missing = r.missing || [];
+  const ms = r.methods || [];
+  let warn = '';
+  if(missing.length){
+    warn = '<div class="hint warn" style="margin:0 0 8px">' +
+      missing.map(x=>'该路径 '+esc(x.dir)+' 没有该文件 '+esc(x.file)).join('<br>') + '</div>';
+  }
+
+  if(r.error || !ms.length){
+    const why = r.error ? '自动读取失败: '+esc(r.error) : '没有识别到任何可用配置';
+    $('#b-read').innerHTML = warn +
+      '<div class="hint err">'+why+'</div>' +
+      '<button class="btn sec mini" style="margin-top:10px" onclick="openFileDlg()">手动选择文件识别</button>';
+    openFileDlg();
+    return;
+  }
+
+  $('#b-read').innerHTML = warn + `
+    <div class="hint" style="margin:0 0 8px">发现 ${ms.length} 个配置,点一个填入表单:</div>
+    ${ms.map((m,i)=>`
+      <div class="bkrow" data-m="${i}">
+        <div class="bkmain">
+          <b>${esc(m.name)}</b>
+          <span class="mono dim">${esc(m.host||'-')} : ${esc(m.port||'-')}</span>
+          <span class="pill">主题 ${esc(m.topic||'-')}</span>
+          <span class="pill">${esc(m.client_id||'')}</span>
+        </div>
+        <div class="bkacts"><button class="btn sec mini">填入</button></div>
+      </div>`).join('')}
+    <div class="hint" style="margin-top:8px">
+      来源: ${esc(r.project||r.root||'')}<br>
+      · MQTT_Request.ini → 方法一(PUB0.0)<br>
+      · MQTTConfig.JSON  → 方法二(kxMQTT 转发)
+      <br><button class="btn sec mini" style="margin-top:8px" onclick="openFileDlg()">手动选择文件识别</button>
+    </div>`;
+
+  $('#b-read').querySelectorAll('.bkrow').forEach(row=>{
+    row.onclick = ()=>fillFormFromMethod(ms[+row.dataset.m]);
+  });
+}
+
+function brokerOptions(sel, role){
+  // 不再按角色过滤——「监听/目标」是方案里的位置，不是 broker 的属性。
+  // 同一个 broker 两边都能用，所以下拉把所有连接信息都列出来。
+  return Object.keys(EDIT.brokers)
+    .map(n=>`<option value="${esc(n)}" ${n===sel?'selected':''}>${esc(n)}</option>`).join('');
+}
+
+let selRoute = -1;   // 方案配置页里选中的方案下标
+let feedRoute = 0;   // 实时数据页正在观察的方案下标
+
+function renderRoutes(){
+  const rows = EDIT.routes.map((r,i)=>{
+    const f = r.from || {};
+    const tgts = r.targets || (r.to ? [r.to] : []);
+    const b = EDIT.brokers[f.broker] || {};
+    const srcIp = (b.host||'-') + ':' + (b.port||'-');
+    const srcTopic = (f.topics||[]).join(' , ') || b.topic || '-';
+    const dstIp = tgts.map(t=>{
+      const bb = EDIT.brokers[t.broker]||{};
+      return (bb.host||'-') + ':' + (bb.port||'-');
+    }).join('<br>') || '-';
+    const dstTopic = tgts.map(t=>esc(t.topic||'-')).join('<br>') || '-';
+    return `<tr class="rt-row${selRoute===i?' sel':''}" data-i="${i}">
+      <td><b>${esc(r.name||('方案'+(i+1)))}</b></td>
+      <td>${r.enabled!==false
+            ? '<span class="stat-pill on">已启用</span>'
+            : '<span class="stat-pill off">已停止</span>'}</td>
+      <td class="mono">${esc(srcIp)}</td>
+      <td class="mono">${esc(srcTopic)}</td>
+      <td class="mono">${dstIp}</td>
+      <td class="mono">${dstTopic}</td>
+    </tr>`;
+  }).join('');
+  $('#route-rows').innerHTML = rows || '<tr><td colspan="6" class="dim" style="padding:18px">还没有方案,点上方「+ 新建方案」</td></tr>';
+  $('#rt-count').textContent = EDIT.routes.length + ' 条';
+
+  $('#route-rows').querySelectorAll('.rt-row').forEach(tr=>{
+    tr.onclick = ()=>selectRoute(+tr.dataset.i);
+  });
+  syncSelButtons();
+}
+
+function selectRoute(i){
+  selRoute = i;
+  renderRoutes();
+}
+
+function syncSelButtons(){
+  const has = selRoute>=0 && EDIT.routes[selRoute];
+  ['btn-run','btn-stop','btn-edit','btn-dup','btn-del'].forEach(id=>{
+    const el=$('#'+id); if(el) el.disabled = !has;
+  });
+  const hint=$('#sel-hint');
+  if(hint){
+    const r = EDIT.routes[selRoute];
+    hint.textContent = has ? ('已选中「'+(r.name||'方案')+'」') : '先在下方列表里选一个方案';
+  }
+  const run=$('#btn-run'), stop=$('#btn-stop');
+  if(has && run && stop){
+    const on = EDIT.routes[selRoute].enabled!==false;
+    run.disabled = on; stop.disabled = !on;
+  }
+}
+
+function runSelected(){
+  if(selRoute<0) return;
+  EDIT.routes[selRoute].enabled = true;
+  renderRoutes(); persist(false, true).then(()=>restart());
+}
+function stopSelected(){
+  if(selRoute<0) return;
+  EDIT.routes[selRoute].enabled = false;
+  renderRoutes(); persist(false, true).then(()=>restart());
+}
+function editSelected(){ if(selRoute>=0) openWizard(selRoute); }
+function dupSelected(){
+  if(selRoute<0) return;
+  const c = JSON.parse(JSON.stringify(EDIT.routes[selRoute]));
+  c.name = (EDIT.routes[selRoute].name||'方案') + ' 副本';
+  EDIT.routes.splice(selRoute+1, 0, c);
+  selRoute = selRoute+1;
+  renderRoutes(); fillRouteSelect(); persistSoon();
+}
+function delSelected(){
+  if(selRoute<0) return;
+  const n = EDIT.routes[selRoute].name || '方案';
+  if(!window.confirm('删除「'+n+'」?')) return;
+  EDIT.routes.splice(selRoute,1);
+  selRoute = -1;
+  renderRoutes(); fillRouteSelect(); persistSoon();
+}
+
+/* ---------------- 向导 ---------------- */
+let wzIndex = -1;      // -1 = 新建
+let wzDraft = null;
+
+function openWizard(idx){
+  wzIndex = (idx===undefined) ? -1 : idx;
+  const names = Object.keys(EDIT.brokers);
+  const src = (wzIndex>=0) ? JSON.parse(JSON.stringify(EDIT.routes[wzIndex])) : null;
+  const allRules = Object.keys(EDIT.rule_library||{});
+  wzDraft = {
+    name: src ? (src.name||'') : ('方案'+(EDIT.routes.length+1)),
+    from: src ? (src.from||{}) : {broker:(names[0]||''),
+                                 topics:['kingscada'], qos:0},
+    targets: src ? (src.targets || (src.to?[src.to]:[]))
+                 : [{broker:(names[0]||''),
+                     topic:'MES', qos:0, retain:false, rules:allRules}],
+    enabled: src ? (src.enabled!==false) : true
+  };
+  // 每个目标都带自己的规则集合
+  wzDraft.targets.forEach(t=>{
+    if(t.rules===undefined) t.rules = (src && src.rules) ? JSON.parse(JSON.stringify(src.rules)) : allRules;
+    t.rules = t.rules.map(r=>typeof r==='string'?r:(r.name||''));
+  });
+  if(!wzDraft.targets.length) wzAddTarget();
+  $('#wz-title').textContent = (wzIndex>=0 ? '编辑方案 · ' : '新建方案 ') + (wzDraft.name||'');
+  $('#wizard').style.display = 'flex';
+  wzRender();
+  wzShow(1);
+}
+
+function closeWizard(){ $('#wizard').style.display = 'none'; }
+
+function wzRender(){
+  $('#wz-name').value = wzDraft.name || '';
+  $('#wz-from-broker').innerHTML = brokerOptions(wzDraft.from.broker, 'listen');
+  $('#wz-from-topics').value = (wzDraft.from.topics||[]).join(', ');
+
+  $('#wz-targets').innerHTML = wzDraft.targets.map((t,i)=>`
+    <div class="wz-target">
+      <div style="display:flex;align-items:center;gap:10px">
+        <b>目标 ${i+1}</b>
+        <button class="btn del mini" style="margin-left:auto" onclick="wzDelTarget(${i})">移除</button>
+      </div>
+      <div class="row">
+        <div><label>broker</label><select data-wt="${i}" data-f="broker">${brokerOptions(t.broker,'target')}</select></div>
+        <div><label>主题</label><input data-wt="${i}" data-f="topic" value="${esc(t.topic||'')}" placeholder="MES"></div>
+        <div><label>客户端 ID</label><input data-wt="${i}" data-f="client_id" value="${esc(t.client_id||'')}" placeholder="留空自动"></div>
+      </div>
+      <label class="chk"><input type="checkbox" data-wt="${i}" data-f="retain" ${t.retain?'checked':''}> 保留消息(retain)</label>
+    </div>`).join('') || '<div class="hint">还没有目标,点下面按钮添加。</div>';
+
+  $('#wz-targets').querySelectorAll('[data-wt]').forEach(inp=>{
+    inp.onchange = ()=>{
+      const i=+inp.dataset.wt, f=inp.dataset.f, t=wzDraft.targets[i];
+      if(f==='retain') t.retain=inp.checked; else t[f]=inp.value;
+    };
+  });
+
+  const lib = EDIT.rule_library || {};
+  const libNames = Object.keys(lib);
+  $('#wz-rules').innerHTML = wzDraft.targets.map((t,ti)=>{
+    const bb = EDIT.brokers[t.broker]||{};
+    const picked = new Set((t.rules||[]).map(r=>typeof r==='string'?r:(r.name||'')));
+    return `<div class="wz-target">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <b>目标 ${ti+1}</b>
+        <span class="pill">${esc(t.topic||'-')}</span>
+        <span class="dim" style="font-size:12px">${esc(bb.host||'-')} : ${esc(bb.port||'-')}</span>
+      </div>
+      ${libNames.map((name)=>{
+        const r = lib[name]||{};
+        const on = picked.has(name);
+        return `<div class="wz-rule${on?' sel':''}" data-t="${ti}" data-n="${esc(name)}">
+          <input type="checkbox" ${on?'checked':''}>
+          <div class="rt-body">
+            <b>${esc(name)}</b>
+            <div class="hint" style="margin-top:6px">
+              匹配 <code>${esc(r.match||'@.')}</code>
+              ${r.each?' · 按 <code>'+esc(r.each)+'</code> 扇出':''}<br>
+              输出 ${esc(Object.keys(r.template||{}).map(k=>k+' = '+r.template[k]).join('     '))}
+            </div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }).join('') || '<div class="hint">还没有目标,回到上一步添加。</div>';
+
+  $('#wz-rules').querySelectorAll('.wz-rule').forEach(row=>{
+    const cb = row.querySelector('input');
+    const ti = +row.dataset.t, name = row.dataset.n;
+    const sync = ()=>{
+      row.classList.toggle('sel', cb.checked);
+      const t = wzDraft.targets[ti];
+      t.rules = t.rules || [];
+      const set = new Set(t.rules.map(r=>typeof r==='string'?r:(r.name||'')));
+      if(cb.checked) set.add(name); else set.delete(name);
+      t.rules = Array.from(set);
+    };
+    cb.onchange = sync;
+    row.onclick = (e)=>{ if(e.target===cb) return; cb.checked=!cb.checked; sync(); };
+  });
+}
+
+function wzAddTarget(){
+  const names = Object.keys(EDIT.brokers);
+  wzDraft.targets.push({broker:(names[0]||''),
+                        topic:'MES', qos:0, retain:false,
+                        rules:Object.keys(EDIT.rule_library||{})});
+  wzRender();
+}
+function wzDelTarget(i){ wzDraft.targets.splice(i,1); wzRender(); }
+
+function wzShow(n){
+  $('#wz1').style.display = n===1 ? 'block' : 'none';
+  $('#wz2').style.display = n===2 ? 'block' : 'none';
+  $('#wz-prev').style.visibility = n===2 ? 'visible' : 'hidden';
+  $('#wz-next').textContent  = n===2 ? '完成' : '下一步 →';
+}
+function wzPrev(){ wzShow(1); }
+function wzNext(){
+  if($('#wizard').dataset.step==='2'){ wzSave(); return }
+  wzDraft.name = $('#wz-name').value.trim() || ('方案'+(EDIT.routes.length+1));
+  wzDraft.from.broker = $('#wz-from-broker').value;
+  wzDraft.from.topics = $('#wz-from-topics').value.split(',').map(s=>s.trim()).filter(Boolean);
+  if(!wzDraft.from.broker) return toast('请选择监听 broker');
+  if(!wzDraft.from.topics.length) return toast('请填写监听主题');
+  if(!wzDraft.targets.length) return toast('至少要有一个目标');
+  $('#wizard').dataset.step = '2';
+  wzShow(2);
+}
+
+function wzSave(){
+  const rec = {
+    name: wzDraft.name, enabled: wzDraft.enabled!==false,
+    from: wzDraft.from,
+    targets: wzDraft.targets.map(t=>({
+      broker: t.broker, topic: t.topic, qos: t.qos||0,
+      retain: !!t.retain, client_id: t.client_id||'',
+      rules: (t.rules||[]).map(n=>n)        // 存规则名,便于复用
+    }))
+  };
+  if(wzIndex>=0) EDIT.routes[wzIndex] = rec;
+  else EDIT.routes.push(rec);
+  selRoute = (wzIndex>=0) ? wzIndex : EDIT.routes.length-1;
+  $('#wizard').dataset.step = '';
+  closeWizard();
+  renderRoutes(); fillRouteSelect();
+  persist(false).then(()=>restart());
+  toast('方案「'+rec.name+'」已保存并启动');
+}
+
+/* ---------------- 规则配置可视化编辑 ---------------- */
+let rlEditKey = null;          // null = 新增
+let rlFields  = [];            // [{k, v}]
+
+// 展开了哪几条规则的内容（可同时开多条）
+const rlOpen = new Set();
+
+function renderRuleLib(){
+  const lib = EDIT.rule_library || {};
+  const names = Object.keys(lib);
+  $('#rl-count').textContent = names.length + ' 条';
+  const rows = [];
+  names.forEach((n,i)=>{
+    const r = lib[n]||{};
+    const fields = Object.keys(r.template||{});
+    rows.push(`<tr class="rt-row${rlEditKey===n?' sel':''}${rlOpen.has(n)?' open':''}" data-i="${i}">
+      <td><b>${esc(n)}</b> <span class="dim">${rlOpen.has(n)?'▾':'▸'}</span></td>
+      <td class="mono"><code>${esc(r.match||'@.')}</code></td>
+      <td class="mono">${r.each?('<code>'+esc(r.each)+'</code>'):'<span class="dim">不扇出</span>'}</td>
+      <td class="mono dim">${fields.map(esc).join('   ')||'-'}</td>
+      <td>
+        <button class="btn sec mini" data-act="edit">编辑</button>
+        <button class="btn sec mini" data-act="dup">复制</button>
+        <button class="btn del mini"  data-act="del">删除</button>
+      </td>
+    </tr>`);
+    if(rlOpen.has(n)){
+      rows.push(`<tr class="rt-detail" data-i="${i}"><td colspan="5">
+        <div class="rl-body">
+          <div class="row2">
+            <div><label>匹配条件</label>
+              <div class="mono"><code>${esc(r.match||'(为空 — 所有报文都用)')}</code></div></div>
+            <div><label>扇出</label>
+              <div class="mono">${r.each?('<code>'+esc(r.each)+'</code>'):'<span class="dim">不扇出，整包一条</span>'}</div></div>
+          </div>
+          <label>输出字段 <span class="dim">共 ${fields.length} 个</span></label>
+          <table class="rl-tbl"><tbody>
+            ${fields.map(k=>`<tr>
+              <td class="mono" style="width:180px"><b>${esc(k)}</b></td>
+              <td class="mono"><code>${esc(String(r.template[k]))}</code></td>
+            </tr>`).join('') || '<tr><td class="dim">没有输出字段</td></tr>'}
+          </tbody></table>
+          <div class="actions" style="margin:12px 0 0">
+            <button class="btn sec mini" data-act="edit">编辑这条</button>
+            <button class="btn sec mini" data-act="dup">复制一条</button>
+            <button class="btn sec mini" data-act="close">收起</button>
+          </div>
+        </div>
+      </td></tr>`);
+    }
+  });
+  $('#rule-rows').innerHTML = rows.join('')
+    || '<tr><td colspan="5" class="dim" style="padding:16px">规则是空的,点上方「+ 新增规则」</td></tr>';
+
+  $('#rule-rows').querySelectorAll('tr').forEach(row=>{
+    const n = names[+row.dataset.i];
+    if(!n && n!=='') return;
+    row.querySelectorAll('[data-act]').forEach(b=>{
+      b.onclick = (e)=>{
+        e.stopPropagation();
+        const a = b.dataset.act;
+        if(a==='edit')  editRule(n);
+        else if(a==='del') delRule(n);
+        else if(a==='dup') dupRule(n);
+        else if(a==='close'){ rlOpen.delete(n); renderRuleLib() }
+      };
+    });
+    if(row.classList.contains('rt-row')) row.onclick = ()=>toggleRule(n);
+  });
+  fillRouteSelect();
+}
+
+function toggleRule(n){
+  if(rlOpen.has(n)) rlOpen.delete(n); else rlOpen.add(n);
+  renderRuleLib();
+}
+
+function dupRule(name){
+  const r = (EDIT.rule_library||{})[name];
+  if(!r) return;
+  let n = name + '-副本', i = 2;
+  while((EDIT.rule_library||{})[n]){ n = name + '-副本' + i; i++ }
+  EDIT.rule_library = EDIT.rule_library || {};
+  EDIT.rule_library[n] = JSON.parse(JSON.stringify(r));
+  rlEditKey = n;
+  renderRuleLib();
+  persist(false, true).then(ok=>toast(ok ? '已复制为「'+n+'」' : '复制成功但落盘失败'));
+}
+
+function renderFields(){
+  $('#rl-fields').innerHTML = rlFields.map((f,i)=>`
+    <div class="row2" style="margin-bottom:8px">
+      <div><input data-fk="${i}" value="${esc(f.k)}" placeholder="字段名；写 @ 可取值，如 @#value.N"
+             title="输出 JSON 的键。写死文字，或以 @ 开头从报文里取值当键（例如 @#value.N 会输出 {&quot;pub11&quot;: 0}）。"></div>
+      <div style="display:flex;gap:8px">
+        <input data-fv="${i}" value="${esc(f.v)}" placeholder="@PVs.1"
+               title="输出 JSON 的值。写 @ 路径取值，支持 | 多路回落，例如 @#value.1|PVs.1；其他写法原样输出。">
+        <button class="btn del mini" style="flex:none" onclick="delField(${i})">删除</button>
+      </div>
+    </div>`).join('') || '<div class="hint">还没有字段,点下面「+ 添加字段」。</div>';
+  $('#rl-fields').querySelectorAll('[data-fk]').forEach(inp=>{
+    inp.oninput = ()=>{ rlFields[+inp.dataset.fk].k = inp.value };
+  });
+  $('#rl-fields').querySelectorAll('[data-fv]').forEach(inp=>{
+    // 值输入框的下标属性是 data-fv，不是 data-fk —— 读错会取到 undefined，
+    // 一敲就抛异常，右边的值永远存不进 rlFields
+    inp.oninput = ()=>{ rlFields[+inp.dataset.fv].v = inp.value };
+  });
+}
+
+function addField(){ rlFields.push({k:'', v:''}); renderFields(); }
+function delField(i){ rlFields.splice(i,1); renderFields(); }
+
+function newRule(){
+  rlEditKey = null;
+  $('#rl-title').textContent = '新增规则';
+  $('#rl-name').value = '';
+  $('#rl-match').value = '';
+  $('#rl-each').value = '';
+  $('#rl-sample').value = '';
+  // 默认给一套能直接用的 kxMQTT 模板。时间戳必须是 @#ts（含毫秒偏移），
+  // 写 @PVs.2 会把全包变量都打成同一时刻
+  rlFields = [{k:'DataName', v:'@#value.N'},
+              {k:'DataValue', v:'@#value.1|PVs.1'},
+              {k:'DataTime', v:'@#ts'},
+              {k:'DataQuality', v:'@#value.3|PVs.3'}];
+  renderFields();
+  $('#rule-editor').style.display = 'block';
+  $('#rl-name').focus();
+}
+
+function editRule(name){
+  const r = (EDIT.rule_library||{})[name] || {};
+  rlEditKey = name;
+  $('#rl-title').textContent = '编辑规则 · ' + name;
+  $('#rl-name').value  = name;
+  $('#rl-match').value = r.match || '';
+  $('#rl-each').value  = r.each  || '';
+  $('#rl-sample').value = r.sample ? JSON.stringify(r.sample, null, 2) : '';
+  rlFields = Object.keys(r.template||{}).map(k=>({k:k, v:r.template[k]}));
+  if(!rlFields.length) rlFields = [{k:'', v:''}];
+  renderFields();
+  $('#rule-editor').style.display = 'block';
+  renderRuleLib();
+  $('#rl-name').focus();
+}
+
+function cancelRule(){ rlEditKey = null; $('#rule-editor').style.display = 'none'; renderRuleLib(); }
+
+async function saveRule(){
+  const name = $('#rl-name').value.trim();
+  if(!name) return toast('请填写规则名称');
+  const tpl = {};
+  rlFields.forEach(f=>{
+    const k = (f.k||'').trim(), v = (f.v||'').trim();
+    if(k && v) tpl[k] = v;
+  });
+  if(!Object.keys(tpl).length) return toast('至少要有一个输出字段');
+
+  // 示例报文：可选，但填了就必须是合法 JSON
+  let sample = null;
+  const rawSample = $('#rl-sample').value.trim();
+  if(rawSample){
+    try{ sample = JSON.parse(rawSample) }
+    catch(e){ return toast('示例报文不是合法 JSON: '+e.message) }
+    if(!sample || typeof sample !== 'object' || Array.isArray(sample)){
+      return toast('示例报文要是 JSON 对象，例如 {"tag1": 0}');
+    }
+  }
+
+  const rec = {
+    match: $('#rl-match').value.trim(),
+    each:  $('#rl-each').value.trim(),
+    template: tpl
+  };
+  if(sample) rec.sample = sample;
+  // renaming: move the entry and re-point every target that used the old name
+  if(rlEditKey && rlEditKey !== name){
+    const nb = {};
+    Object.keys(EDIT.rule_library||{}).forEach(k=> nb[k===rlEditKey ? name : k] = EDIT.rule_library[k]);
+    EDIT.rule_library = nb;
+    EDIT.routes.forEach(r=>(r.targets||[]).forEach(t=>{
+      t.rules = (t.rules||[]).map(x=> x===rlEditKey ? name : (typeof x==='string'?x:(x.name||'')));
+    }));
+  }
+  EDIT.rule_library = EDIT.rule_library || {};
+  EDIT.rule_library[name] = rec;
+  rlEditKey = name;
+  renderRuleLib();
+  // 点了「保存规则」就当场落盘，不排队——否则提示"已保存"其实是"待保存"，
+  // 这中间切一下页改动就没了
+  const ok = await persist(false, true);
+  toast(ok ? '规则「'+name+'」已保存' : '规则「'+name+'」保存失败');
+}
+
+async function delRule(name){
+  if(!window.confirm('删除规则「'+name+'」?\n(勾选了它的方案会自动取消勾选)')) return;
+  delete (EDIT.rule_library||{})[name];
+  EDIT.routes.forEach(r=>(r.targets||[]).forEach(t=>{
+    t.rules = (t.rules||[]).filter(x=> (typeof x==='string'?x:(x.name||'')) !== name);
+  }));
+  if(rlEditKey===name) cancelRule();
+  renderRuleLib();
+  const ok = await persist(false, true);
+  toast(ok ? '已删除规则「'+name+'」' : '删除失败');
+}
+
+function applyRaw(){
+  try{
+    const c = JSON.parse($('#rawcfg').value);
+    EDIT.brokers = c.brokers||{};
+    EDIT.routes  = c.routes||[];
+    EDIT.rule_library = c.rule_library||{};
+    renderBrokerList(); renderRoutes(); renderRuleLib(); fillRouteSelect();
+    persistSoon();
+    toast('已应用原始配置');
+  }catch(e){ toast('JSON 有误: '+e.message) }
+}
+
+function buildCfg(){
+  let cfg = {};
+  try{ cfg = JSON.parse($('#rawcfg').value || '{}') }catch(e){}
+  // has_password is a display-only flag from the API -- never write it to the file
+  const bk = JSON.parse(JSON.stringify(EDIT.brokers));
+  Object.values(bk).forEach(b=>{ if(b && typeof b==='object') delete b.has_password });
+  cfg.brokers = bk;
+  cfg.rule_library = EDIT.rule_library || cfg.rule_library || {};
+  cfg.routes  = EDIT.routes;
+  return cfg;
+}
+
+let persistTimer = null;
+async function persist(restart, quiet){
+  if(persistTimer){ clearTimeout(persistTimer); persistTimer = null }
+  try{
+    const r = await j('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({config:buildCfg(), restart:!!restart})});
+    if(r.error){ toast('保存失败: '+r.error); return false }
+    if(!quiet) toast(restart ? '已保存并重建连接' : '已写入 reshape.json');
+    return true;
+  }catch(e){ toast('保存失败'); return false }
+}
+// 轻量改动(改个字段)自动落盘,免得刷新就丢
+function persistSoon(){
+  if(persistTimer) clearTimeout(persistTimer);
+  persistTimer = setTimeout(()=>persist(false, true), 700);
+}
+// 把还在排队的改动立刻写下去。切页前必须先调——否则 loadCfg() 会拿服务端的
+// 旧配置盖掉本地 EDIT，等定时器到点反而把旧数据写回去，改动就没了。
+async function flushPending(){
+  if(persistTimer){
+    clearTimeout(persistTimer);
+    persistTimer = null;
+    return persist(false, true);
+  }
+  return true;
+}
+
+async function saveCfg(){
+  const ok = await persist(true);
+  if(ok){ loadAll(); loadCfg() }
+}
+
+async function restart(){
+  // flush anything still pending so a quick click can't lose an edit
+  if(persistTimer){ clearTimeout(persistTimer); persistTimer=null; await persist(false,true) }
+  await j('/api/restart',{method:'POST'});
+  toast('服务已重启');
+  setTimeout(loadAll,800);
+}
+
+/* ---------------- test ---------------- */
+function fillRouteSelect(){
+  // 方案下拉只给在线测试用（它要知道发到哪、从哪抓）
+  const sel = $('#lt-route');
+  if(sel){
+    const cur = sel.value;
+    sel.innerHTML = EDIT.routes.map((r,i)=>`<option value="${i}">${esc(r.name||('方案'+(i+1)))}</option>`).join('')
+                 || '<option value="0">无方案</option>';
+    if(cur!=='' && cur!==undefined && EDIT.routes[+cur]) sel.value = cur;
+    sel.onchange = liveInfo;
+  }
+  fillRulePicks();
+  liveInfo();
+}
+
+// ---- 规则选择 ----
+// 离线测试：勾选的规则真生效（这才是「试算模板」）
+// 在线测试：只展示，因为走的是真实链路，用的必然是方案里配的那套
+//
+// 注意：$ 就是 document.querySelector，传 't-rules' 是找标签名（找不到），
+// 必须写 '#t-rules' 才是找 id。这里统一补上 #，免得调用方写漏。
+function pickBox(id){ return $(String(id).startsWith('#') ? id : '#' + id) }
+
+function pickedRules(id){
+  const box = pickBox(id); if(!box) return [];
+  return [...box.querySelectorAll('input')].filter(i=>i.checked).map(i=>i.value);
+}
+
+function ruleInfo(){
+  const names = pickedRules('t-rules');
+  $('#t-ruleinfo').innerHTML = names.length
+    ? `已选 <b>${names.length}</b> 条：<br><span class="dim">${names.map(esc).join('、')}</span>`
+    : '<span class="warn">还没选规则 —— 试算不会出结果</span>';
+}
+
+function syncPick(inp){
+  const lb = inp.parentElement;
+  if(lb && lb.classList) lb.classList.toggle('on', inp.checked);
+  ruleInfo();
+  updateSample();          // 勾选变了就换示例报文
+}
+
+// 多条规则的示例拼成一个 JSON：对象递归合并，同名键后者覆盖（数组整体替换）
+function mergeSamples(objs){
+  const out = {};
+  for(const o of objs){
+    if(!o || typeof o !== 'object') continue;
+    for(const k of Object.keys(o)){
+      const v = o[k];
+      const prev = out[k];
+      if(v && typeof v === 'object' && !Array.isArray(v)
+         && prev && typeof prev === 'object' && !Array.isArray(prev)){
+        out[k] = mergeSamples([prev, v]);
+      }else{
+        out[k] = v;
+      }
+    }
+  }
+  return out;
+}
+
+let sampleSig = '';    // 上次自动填进去的内容
+function updateSample(){
+  const names = pickedRules('t-rules');
+  const lib = EDIT.rule_library || {};
+  const samples = names.map(n => (lib[n]||{}).sample)
+                       .filter(s => s && typeof s === 'object');
+  if(!samples.length) return;        // 一条示例都没有，保持现状
+  const json = JSON.stringify(mergeSamples(samples), null, 2);
+  // 按「内容」而不是「选了哪几条」判断——规则的示例改了也要跟着换；
+  // 内容一致时不动输入框，免得把用户手写的东西冲掉
+  const sig = names.join(' ') + ' ' + json;
+  if(sig === sampleSig) return;
+  sampleSig = sig;
+  const box = $('#t-in');
+  if(box) box.value = json;
+}
+function pickAllRules(id){
+  pickBox(id).querySelectorAll('input').forEach(i=>{ i.checked = true; syncPick(i) });
+}
+function clearRules(id){
+  pickBox(id).querySelectorAll('input').forEach(i=>{ i.checked = false; syncPick(i) });
+}
+
+function fillRulePicks(){
+  const lib = EDIT.rule_library || {};
+  const names = Object.keys(lib);
+  const box = $('#t-rules');
+  if(box){
+    const keep = new Set(pickedRules('t-rules'));
+    box.innerHTML = names.map((n,i)=>{
+      const r = lib[n]||{};
+      const on = keep.size ? keep.has(n) : i === 0;   // 第一次进来默认勾第一条
+      return `<label class="${on?'on':''}">
+        <input type="checkbox" value="${esc(n)}" ${on?'checked':''}>
+        <span class="rn">${esc(n)}</span>
+        <span class="rm">${esc(r.match||'@.')}</span>
+      </label>`;
+    }).join('') || '<div class="hint">规则是空的，先去「规则配置」建一条</div>';
+    box.querySelectorAll('input').forEach(inp=>{ inp.onchange = ()=>syncPick(inp) });
+    ruleInfo();
+  }
+  renderRouteRules();
+  updateSample();      // 首次进来按默认勾选填一次示例
+}
+
+function renderRouteRules(){
+  const box = $('#lt-rules'); if(!box) return;
+  const i = +($('#lt-route')?.value ?? 0) || 0;
+  const r = (EDIT.routes||[])[i] || {};
+  const names = [];
+  const take = x => {
+    const n = typeof x === 'string' ? x : (x && x.name) || '';
+    if(n && !names.includes(n)) names.push(n);
+  };
+  (r.targets||[]).forEach(t=>(t.rules||[]).forEach(take));
+  (r.rules||[]).forEach(take);
+  box.innerHTML = names.map(n=>{
+    const rr = (EDIT.rule_library||{})[n]||{};
+    return `<label class="ro"><span class="rn">${esc(n)}</span>
+            <span class="rm">${esc(rr.match||'@.')}</span></label>`;
+  }).join('') || '<div class="hint warn">这个方案还没绑规则</div>';
+}
+
+async function runTest(){
+  $('#t-err').textContent='';
+  try{ JSON.parse($('#t-in').value) }
+  catch(e){ return $('#t-err').textContent='输入不是合法 JSON: '+e.message }
+  const rules = pickedRules('t-rules');
+  if(!rules.length) return $('#t-err').textContent='请先勾选至少一条规则';
+  const r = await j('/api/test',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({payload:$('#t-in').value, rules:rules})});
+  if(r.error){ $('#t-out2').innerHTML=''; return $('#t-err').textContent=r.error }
+  $('#t-count').textContent = r.count+' 条 · 规则 ' + rules.length + ' 条';
+  $('#t-out2').innerHTML = r.messages.map((m,i)=>
+    `<tr><td class="dim">${i+1}</td><td><pre>${esc(JSON.stringify(m))}</pre></td></tr>`).join('')
+    || '<tr><td colspan="2" class="dim" style="padding:18px">没有输出 — 规则的匹配条件都没命中这条报文</td></tr>';
+}
+
+/* ---------------- 模拟测试：离线 / 在线 ---------------- */
+function testTab(which){
+  document.querySelectorAll('#s-test .subnav button').forEach(b=>{
+    b.classList.toggle('on', b.dataset.t===which);
+  });
+  $('#test-off').style.display = which==='off' ? 'block' : 'none';
+  $('#test-on').style.display = which==='on'  ? 'block' : 'none';
+  if(which==='on') liveInfo();
+}
+
+function liveInfo(){
+  const sel = $('#lt-route');
+  const i = +(sel?.value ?? 0) || 0;
+  const r = (EDIT.routes||[])[i] || {};
+  const f = r.from || {};
+  const t = (r.targets||[])[0] || {};
+  const fb = EDIT.brokers[f.broker] || {};
+  const tb = EDIT.brokers[t.broker] || {};
+  $('#lt-info').innerHTML =
+    `发到 <b>${esc(f.broker||'-')}</b> / <code>${esc((f.topics||[]).join(',')||'-')}</code>` +
+    `　→　从 <b>${esc(t.broker||'-')}</b> / <code>${esc(t.topic||'-')}</code> 抓` +
+    `<br><span class="dim">${esc(fb.host||'-')}:${esc(fb.port||'-')} → ${esc(tb.host||'-')}:${esc(tb.port||'-')}</span>`;
+  renderRouteRules();   // 同步显示这个方案绑的规则
+}
+
+async function runLiveTest(){
+  $('#lt-err').textContent='';
+  $('#lt-result').textContent='';
+  let doc;
+  try{ doc = JSON.parse($('#lt-in').value) }
+  catch(e){ return $('#lt-err').textContent='输入不是合法 JSON: '+e.message }
+  const idx = +($('#lt-route')?.value ?? 0) || 0;
+  const wait = parseFloat($('#lt-wait').value) || 2.5;
+  $('#lt-count').textContent = '抓取中 …';
+  $('#lt-out').innerHTML = '<tr><td colspan="3" class="dim">正在发送并等待目标主题回话 …</td></tr>';
+  let r;
+  try{
+    r = await j('/api/live_test',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({payload:doc, route:idx, wait:wait})});
+  }catch(e){
+    $('#lt-count').textContent='';
+    $('#lt-out').innerHTML='';
+    return $('#lt-err').textContent='请求失败: '+(e.message||e);
+  }
+  if(r.error){
+    $('#lt-count').textContent='';
+    $('#lt-out').innerHTML='';
+    return $('#lt-err').textContent=r.error;
+  }
+  const got = r.received||[];
+  $('#lt-count').textContent = got.length+' 条';
+  $('#lt-result').innerHTML =
+    `已发到 <code>${esc(r.sent.topic)}</code>　·　期望 <code>${esc(r.expect_topic)}</code> 收` +
+    `　·　等待 ${r.wait} 秒　·　实收 <b>${got.length}</b> 条`;
+  $('#lt-out').innerHTML = got.map((m,i)=>
+    `<tr><td class="dim">${i+1}</td><td class="mono">${esc(m.topic||'')}</td>
+     <td><pre>${esc(m.body||'')}</pre></td></tr>`).join('')
+    || '<tr><td colspan="3" class="dim" style="padding:18px">目标主题没收到东西 — 转发链路可能没跑，或方案没在运行</td></tr>';
+}
+
+/* ---------------- log ---------------- */
+let hBefore = null;      // 分页游标
+
+function parseTime(s){
+  if(!s) return null;
+  const t = String(s).trim();
+  if(!t) return null;
+  if(/^\d+(\.\d+)?$/.test(t)) return parseFloat(t);
+  const d = new Date(t.replace(/-/g,'/'));
+  return isNaN(d.getTime()) ? null : d.getTime()/1000;
+}
+
+function hQuery(){
+  return {
+    route: $('#h-route').value,
+    direction: $('#h-dir').value,
+    keyword: $('#h-kw').value.trim(),
+    since: parseTime($('#h-from').value),
+    until: parseTime($('#h-to').value)
+  };
+}
+
+async function loadHistory(older){
+  if(!older) hBefore = null;
+  const q = hQuery();
+  const qs = Object.entries(q).filter(([,v])=>v!==null && v!=='')
+    .map(([k,v])=>k+'='+encodeURIComponent(v)).join('&');
+  try{
+    const r = await j('/api/history?'+qs+(hBefore?('&before='+hBefore):'')+'&limit=200');
+    const rows = r.rows||[];
+    const fmt = ts => new Date(ts*1000).toLocaleString('zh-CN',{hour12:false}) +
+                      '.'+String(Math.floor((ts%1)*1000)).padStart(3,'0');
+    const html = rows.map(x=>`
+      <tr>
+        <td class="dim">${fmt(x.ts)}</td>
+        <td>${esc(x.route||'-')}</td>
+        <td><span class="pill ${x.direction==='in'?'':'ok'}">${x.direction==='in'?'原始':'转换'}</span></td>
+        <td class="mono dim">${esc(x.topic||'-')}</td>
+        <td><pre>${esc((x.body||'').slice(0,400))}</pre></td>
+      </tr>`).join('');
+    $('#h-rows').innerHTML = older ? ($('#h-rows').innerHTML + html)
+                                   : (html || '<tr><td colspan="5" class="dim" style="padding:18px">没有匹配的记录</td></tr>');
+    if(rows.length) hBefore = rows[rows.length-1].ts;
+    const c = r.counts||{};
+    const pct = c.max_mb ? Math.min(100, Math.round((c.used_mb||0) / c.max_mb * 100)) : 0;
+    $('#h-count').innerHTML =
+      `本次 ${rows.length} 条 · 库中共 ${c.messages||0} 条报文 / ${c.events||0} 条事件` +
+      ` · 占用 <b class="${pct>85?'err':pct>60?'warn':'ok'}">${(c.used_mb||0)} MB</b> / 上限 ${c.max_mb} MB (${pct}%)` +
+      ` · 保留 ${c.keep_days||30} 天`;
+  }catch(e){}
+}
+
+let eBefore = null;
+
+function auditTab(which){
+  document.querySelectorAll('.subnav button').forEach(b=>{
+    b.classList.toggle('on', b.dataset.t===which);
+  });
+  $('#audit-msg').style.display   = which==='msg'   ? 'block' : 'none';
+  $('#audit-evt').style.display   = which==='evt'   ? 'block' : 'none';
+  $('#audit-store').style.display = which==='store' ? 'block' : 'none';
+  if(which==='msg') loadHistory();
+  else if(which==='evt') loadEvents();
+  else loadStorage();
+}
+
+/* ---------------- 存储管理 ---------------- */
+async function loadStorage(){
+  let d;
+  try{ d = await j('/api/storage'); }
+  catch(e){ toast('读取存储信息失败: '+(e.message||e)); return }
+
+  const s = d.settings||{};
+  if(document.activeElement !== $('#st-max'))   $('#st-max').value  = s.max_mb ?? '';
+  if(document.activeElement !== $('#st-days'))  $('#st-days').value = s.segment_days ?? '';
+  $('#st-dir').textContent = s.data_dir||'-';
+
+  const c = d.counts||{};
+  const segs = d.segments||[];
+  const used = c.used_mb||0, max = s.max_mb||1;
+  const pct = Math.min(100, Math.round(used/max*100));
+  $('#st-sum').innerHTML =
+    `${segs.length} 个库 · 共 <b class="${pct>85?'err':pct>60?'warn':'ok'}">${used} MB</b>` +
+    ` · 单库上限 ${max} MB · 已连接 ${c.connected||0}/${segs.length}` +
+    ` · 报文 ${fmtN(c.messages||0)} 条`;
+
+  $('#st-rows').innerHTML = segs.map(g=>{
+    const span = g.first_ts ? (fmtTs(g.first_ts)+' ~ '+fmtTs(g.last_ts)) : '(空)';
+    const state = g.current ? '<span class="stat-pill busy">当前·写入中</span>'
+               : g.connected ? '<span class="stat-pill on">已连接</span>'
+               : '<span class="stat-pill off">已断开</span>';
+    const acts = g.current ? '<span class="dim">切段后可操作</span>' :
+      `<button class="btn sec mini" onclick="stAct('connect','${g.name}')">连接</button>
+       <button class="btn sec mini" onclick="stAct('disconnect','${g.name}')">断开</button>
+       <button class="btn del mini"  onclick="stDel('${g.name}')">删除</button>`;
+    return `<tr>
+      <td class="mono">${g.name}</td>
+      <td>${g.size_mb} MB</td>
+      <td>${fmtN(g.messages)}</td>
+      <td class="mono dim" style="font-size:11px">${span}</td>
+      <td>${state}</td>
+      <td>${acts}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" class="dim">还没有数据库文件</td></tr>';
+
+  const a = d.actions || {};
+  const by = Object.entries(a.by_kind||{}).map(([k,v])=>esc(k)+' '+fmtN(v)).join(' · ');
+  $('#st-actions').innerHTML =
+    `文件 <b class="mono">${esc((a.path||'').split(/[\\/]/).pop()||'-')}</b>` +
+    ` · <b>${fmtN(a.actions||0)}</b> 条 · ${a.size_mb||0} MB` +
+    (by ? `<br><span class="dim">分类：${by}</span>` : '');
+}
+
+function fmtN(n){ return (n||0).toLocaleString('en-US') }
+function fmtTs(t){
+  if(!t) return '-';
+  const d = new Date(t*1000);
+  const p = x=>String(x).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+async function stPost(body, confirmMsg){
+  if(confirmMsg && !window.confirm(confirmMsg)) return;
+  let d;
+  try{
+    d = await j('/api/storage',{method:'POST',headers:{'Content-Type':'application/json'},
+                                body: JSON.stringify(body)});
+  }catch(e){ toast('操作失败: '+(e.message||e)); await loadStorage(); return }
+  toast(d.message || (d.ok?'已执行':'失败'));
+  await loadStorage();
+  loadHistory(); loadEvents();
+}
+
+function saveStorageSettings(){
+  const max = parseInt($('#st-max').value)||0;
+  const days = parseInt($('#st-days').value)||0;
+  if(max<1) return toast('存储上限至少 1 MB');
+  if(days<1) return toast('分段周期至少 1 天');
+  stPost({action:'settings', max_mb:max, segment_days:days});
+}
+function stAct(act, name){ stPost({action:act, name:name}) }
+function clearActions(){
+  stPost({action:'clear_actions'}, '清空全部动作记录?\n增删改留痕和连接事件都会消失，不可恢复。');
+}
+function stDel(name){
+  stPost({action:'delete', name:name}, `删除数据库「${name}」?\n里面的报文和事件会一并消失，不可恢复。`);
+}
+function clearCurrent(){
+  stPost({action:'clear_current'}, '清空正在写入的那个数据库?\n只清数据、保留文件。不可恢复。');
+}
+function purgeAll(){
+  stPost({action:'purge_all'}, '清空全部历史数据库?\n所有报文和事件都会删除，不可恢复。');
+}
+function purgeOldest(){
+  const n = parseInt($('#st-n').value)||1;
+  stPost({action:'purge_oldest', n:n}, `删除最旧的 ${n} 个数据库?\n不可恢复。`);
+}
+function purgeRange(){
+  const a = parseTime($('#st-from').value), b = parseTime($('#st-to').value);
+  if(!a || !b) return toast('请填开始时间和结束时间，格式 2026-10-10 00:00:00');
+  if(b < a) return toast('结束时间不能早于开始时间');
+  stPost({action:'purge_range', since:a, until:b},
+         `清除 ${$('#st-from').value} ~ ${$('#st-to').value} 之间的全部记录?\n不可恢复。`);
+}
+
+function eQuery(){
+  return {
+    kind: $('#e-kind').value,
+    op: $('#e-op').value,
+    level: $('#e-level').value,
+    keyword: $('#e-kw').value.trim(),
+    since: parseTime($('#e-from').value),
+    until: parseTime($('#e-to').value)
+  };
+}
+
+function resetEvents(){
+  $('#e-kind').value=''; $('#e-op').value=''; $('#e-level').value='';
+  $('#e-kw').value=''; $('#e-from').value=''; $('#e-to').value='';
+  loadEvents();
+}
+
+// 增删改各给一个颜色，一眼能从一堆记录里挑出来
+const OP_CLS = {'新增':'ok', '修改':'warn', '删除':'err', '清除':'err'};
+
+async function loadEvents(older){
+  if(!older) eBefore = null;
+  const q = eQuery();
+  const qs = Object.entries(q).filter(([,v])=>v!==null && v!=='')
+    .map(([k,v])=>k+'='+encodeURIComponent(v)).join('&');
+  try{
+    const r = await j('/api/events?'+qs+(eBefore?('&before='+eBefore):'')+'&limit=200');
+    const rows = r.rows||[];
+    const fmt = ts => new Date(ts*1000).toLocaleString('zh-CN',{hour12:false}) +
+                      '.'+String(Math.floor((ts%1)*1000)).padStart(3,'0');
+    const html = rows.map(x=>{
+      const cls = x.level==='error'?'err':x.level==='warn'?'warn':'dim';
+      const ocls = OP_CLS[x.op] || 'dim';
+      return `<tr>
+        <td class="dim">${fmt(x.ts)}</td>
+        <td><span class="pill ${cls}">${esc(x.level||'-')}</span></td>
+        <td>${esc(x.kind||'-')}</td>
+        <td><span class="pill ${ocls}">${esc(x.op||'-')}</span></td>
+        <td class="mono">${esc(x.target||'-')}</td>
+        <td>${esc(x.text||x.detail||'')}</td>
+      </tr>`;
+    }).join('');
+    $('#e-rows').innerHTML = older ? ($('#e-rows').innerHTML + html)
+      : (html || '<tr><td colspan="6" class="dim" style="padding:18px">没有匹配的记录</td></tr>');
+    if(rows.length) eBefore = rows[rows.length-1].ts;
+    const c = r.counts||{};
+    const by = Object.entries(c.by_kind||{}).map(([k,v])=>k+' '+v).join(' · ');
+    $('#e-count').innerHTML = `本次 ${rows.length} 条` +
+      (c.actions!=null ? ` · 库中共 <b>${fmtN(c.actions)}</b> 条` : '') +
+      (by ? `<br><span class="dim">${by}</span>` : '');
+  }catch(e){}
+}
+
+function resetHistory(){
+  $('#h-kw').value=''; $('#h-from').value=''; $('#h-to').value='';
+  $('#h-dir').value=''; $('#h-route').value='';
+  loadHistory();
+}
+
+function exportCsv(){
+  const q = hQuery();
+  const qs = Object.entries(q).filter(([,v])=>v!==null && v!=='')
+    .map(([k,v])=>k+'='+encodeURIComponent(v)).join('&');
+  window.location.href = '/api/export?'+qs;
+}
+
+function fillHistoryRoutes(){
+  const sel = $('#h-route'); if(!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">全部</option>' +
+    EDIT.routes.map(r=>`<option value="${esc(r.name||'')}">${esc(r.name||'方案')}</option>`).join('');
+  sel.value = cur||'';
+}
+
+function loadAll(){loadStatus();loadFeed();}
+loadAll(); loadCfg(); addBroker();
+setInterval(loadStatus,1000);
+setInterval(loadFeed,2500);
+setInterval(()=>{
+  const b=document.querySelector('nav button.on');
+  if(!b || b.dataset.s!=='log') return;
+  const sub=document.querySelector('.subnav button.on');
+  if(sub && sub.dataset.t==='evt') loadEvents(); else loadHistory();
+},5000);
+try{ const es=new EventSource('/api/stream'); es.onmessage=()=>loadFeed(); }catch(e){}
+</script>
+</body>
+</html>
