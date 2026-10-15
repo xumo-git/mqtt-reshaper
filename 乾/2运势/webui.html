@@ -759,13 +759,14 @@
       <div id="sys-detail" class="hint">点下面的「状态检测」跑一遍体检。</div>
       <div class="btn-group">
         <button class="btn sec" onclick="sysCheck()">状态检测</button>
-        <button class="btn" onclick="sysHeal()">自动修复</button>
-        <button class="btn sec" onclick="sysEngine('start')">启动转发</button>
-        <button class="btn sec" onclick="sysEngine('stop')">停止转发</button>
+        <button class="btn sec" onclick="sysHeal()">自动修复</button>
+        <button class="btn sec" onclick="sysEngine('start')">启动服务</button>
+        <button class="btn sec" onclick="sysEngine('stop')">停止服务</button>
         <button class="btn sec" onclick="restart()">重建转发连接</button>
       </div>
       <div class="hint">
-        <b>启动 / 停止转发</b> = 只管收发 MQTT 那部分，界面本身不受影响<br>
+        <b>启动 / 停止服务</b> = 管整套收发。启动后方案是<b>关闭</b>的，
+        要去「方案配置」逐个点 ▶ 启动<br>
         <b>重建转发连接</b> = 改完配置点它生效（重连 MQTT，不重启程序）<br>
         <b>自动修复</b> = 逐项体检：配置能不能读、方案解析对不对、存储能不能用、
         每个 broker 通不通，然后把能修的当场修掉
@@ -876,6 +877,7 @@ async function loadStatus(){
   try{
     const s = await j('/api/status');
     setAlive(true);
+    lastStatus = s;
     let in_=0,out=0,bad=0,drop=0;
     (s.routes||[]).forEach(r=>{
       in_+=r.stats.in; out+=r.stats.out; bad+=r.stats.bad; drop+=r.stats.drop;
@@ -902,6 +904,10 @@ async function loadStatus(){
     });
     fillFeedRouteSelect(s.routes);
     if((s.routes||[]).length && feedRoute==null) feedRoute = s.routes[0].idx;
+    renderRoutes();          // 方案列表的「运行中/已停止」跟着刷新
+    // 心跳反映的是「服务在不在跑」，不只是 Web 通不通：
+    // 服务停了（engine=false）同样要灰掉 + 小人抓狂
+    setAlive(s.engine !== false);
   }catch(e){ setAlive(false) }
 }
 
@@ -1322,6 +1328,7 @@ function brokerOptions(sel, role){
 }
 
 let selRoute = -1;   // 方案配置页里选中的方案下标
+let lastStatus = null;   // 最近一次 /api/status，方案跑没跑以它为准
 let feedRoute = 0;   // 实时数据页正在观察的方案下标
 
 function renderRoutes(){
@@ -1336,11 +1343,13 @@ function renderRoutes(){
       return (bb.host||'-') + ':' + (bb.port||'-');
     }).join('<br>') || '-';
     const dstTopic = tgts.map(t=>esc(t.topic||'-')).join('<br>') || '-';
+    // 跑没跑以服务端为准：重启后方案默认关闭，配置里的 enabled 只代表你的意图
+    const live = (lastStatus && lastStatus.routes || []).find(x=>x.idx===i);
+    const on = live ? !!live.running : false;
     return `<tr class="rt-row${selRoute===i?' sel':''}" data-i="${i}">
       <td><b>${esc(r.name||('方案'+(i+1)))}</b></td>
-      <td>${r.enabled!==false
-            ? '<span class="stat-pill on">已启用</span>'
-            : '<span class="stat-pill off">已停止</span>'}</td>
+      <td>${on ? '<span class="stat-pill on">运行中</span>'
+               : '<span class="stat-pill off">已停止</span>'}</td>
       <td class="mono">${esc(srcIp)}</td>
       <td class="mono">${esc(srcTopic)}</td>
       <td class="mono">${dstIp}</td>
@@ -1373,21 +1382,29 @@ function syncSelButtons(){
   }
   const run=$('#btn-run'), stop=$('#btn-stop');
   if(has && run && stop){
-    const on = EDIT.routes[selRoute].enabled!==false;
+    const live = (lastStatus && lastStatus.routes || []).find(x=>x.idx===selRoute);
+    const on = live ? !!live.running : false;
     run.disabled = on; stop.disabled = !on;
+    run.title = on ? '这条方案正在运行' : '启动这条方案';
+    stop.title = on ? '停止这条方案' : '这条方案没在运行';
   }
 }
 
-function runSelected(){
-  if(selRoute<0) return;
-  EDIT.routes[selRoute].enabled = true;
-  renderRoutes(); persist(false, true).then(()=>restart());
+// 启停走服务端的 /api/route —— 这是运行时状态，不写配置。
+// 服务重启后方案默认关闭，就是要你到这里手动开。
+async function routeAct(act){
+  if(selRoute<0) return toast('先在下方列表里选一个方案');
+  let d;
+  try{
+    d = await j('/api/route',{method:'POST',headers:{'Content-Type':'application/json'},
+                              body:JSON.stringify({idx:selRoute, action:act})});
+  }catch(e){ return toast('操作失败: '+(e.message||e)) }
+  toast(d.message || '已执行');
+  if(d.status) lastStatus = d.status;
+  renderRoutes(); syncSelButtons();
 }
-function stopSelected(){
-  if(selRoute<0) return;
-  EDIT.routes[selRoute].enabled = false;
-  renderRoutes(); persist(false, true).then(()=>restart());
-}
+function runSelected(){ return routeAct('start') }
+function stopSelected(){ return routeAct('stop') }
 function editSelected(){ if(selRoute>=0) openWizard(selRoute); }
 function dupSelected(){
   if(selRoute<0) return;

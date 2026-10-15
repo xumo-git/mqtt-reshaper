@@ -69,6 +69,7 @@ class State:
         self.routes = []
         self.log = []
         self.started = time.time()
+        self.engine_running = False   # 转发引擎在不在跑（区别于 Web 服务本身）
 
     def logline(self, level, text, route=None):
         now = time.time()
@@ -90,9 +91,11 @@ class State:
         with self.lock:
             return {
                 "uptime": int(time.time() - self.started),
+                "engine": self.engine_running,
                 "routes": [{
                     "idx": r.idx,
                     "name": r.name,
+                    "running": bool(getattr(r, "running", False)),
                     "src_connected": r.src_connected,
                     "dst_connected": r.dst_connected,
                     "src_last_ts": r.src_last_ts,
@@ -128,11 +131,13 @@ def route_state(idx):
 # ------------------------------------------------------------------ engine
 
 
-class RouteRunner(threading.Thread):
-    """Owns the two MQTT connections for one route."""
+class RouteRunner:
+    """Owns the two MQTT connections for one route.
+
+    不再继承 Thread：start_route() 只是把收发线程拉起来，可以反复启停。
+    """
 
     def __init__(self, conf, idx):
-        super().__init__(daemon=True)
         self.conf = conf
         self.idx = idx
         self.name = conf.get("name") or ("方案%d" % (idx + 1))
@@ -151,6 +156,7 @@ class RouteRunner(threading.Thread):
         self.stop_evt = threading.Event()
         self.src_cli = None
         self.dst_clis = []        # one connection per target
+        self._threads = []        # 这条方案的收发线程，启停据此判断
 
     @staticmethod
     def _client(b, tag, cid_hint):
@@ -158,17 +164,56 @@ class RouteRunner(threading.Thread):
         return MqttClient(b["host"], int(b.get("port", 1883)), cid,
                           b.get("username"), b.get("password"), b.get("keepalive", 30))
 
-    def run(self):
+    def start_route(self):
+        """把这条方案的收发线程拉起来。可反复调用。
+
+        服务启动时**不**自动跑方案——按说好的，重启后方案默认关闭，
+        要在「方案配置」里手动启动。
+        """
+        if self._threads and any(t.is_alive() for t in self._threads):
+            return False, "「%s」已经在运行" % self.name
+        self.stop_evt.clear()
+        self.dst_clis = []
         src = self.conf["source"]
         targets = self.conf.get("targets") or []
         self.src_cli = self._client(src["broker"], "r%dsrc" % self.idx, src.get("client_id"))
         self.src_cli.on_message = self._on_msg
+        self._threads = []
         for k, t in enumerate(targets):
             cli = self._client(t["broker"], "r%ddst%d" % (self.idx, k), t.get("client_id"))
             self.dst_clis.append(cli)
-            threading.Thread(target=self._serve, daemon=True,
-                             args=(cli, "dst", None, 0)).start()
-        self._serve(self.src_cli, "src", self.st.topics, int(src.get("qos", 0)))
+            th = threading.Thread(target=self._serve, daemon=True,
+                                  args=(cli, "dst", None, 0))
+            th.start()
+            self._threads.append(th)
+        th = threading.Thread(target=self._serve, daemon=True,
+                              args=(self.src_cli, "src", self.st.topics,
+                                    int(src.get("qos", 0))))
+        th.start()
+        self._threads.append(th)
+        with STATE.lock:
+            self.st.running = True
+        return True, "「%s」已启动" % self.name
+
+    @property
+    def running(self):
+        return bool(self._threads) and any(t.is_alive() for t in self._threads)
+
+    def shutdown(self):
+        self.stop_evt.set()
+        for c in [self.src_cli] + list(self.dst_clis or []):
+            try:
+                if c:
+                    c.disconnect()
+            except Exception:
+                pass
+        self._threads = []
+        self.src_cli = None
+        self.dst_clis = []
+        with STATE.lock:
+            self.st.src_connected = False
+            self.st.dst_connected = False
+            self.st.running = False
 
     def _serve(self, cli, role, topics, qos):
         backoff = 1
@@ -276,15 +321,6 @@ class RouteRunner(threading.Thread):
                     pass
             emit("out")
 
-    def shutdown(self):
-        self.stop_evt.set()
-        for c in [self.src_cli] + list(self.dst_clis):
-            try:
-                if c:
-                    c.disconnect()
-            except Exception:
-                pass
-
 
 RUNNERS = []
 
@@ -307,17 +343,35 @@ class Engine:
         with STATE.lock:
             STATE.cfg = cfg
             STATE.routes = []
+            STATE.engine_running = True
         for i, r in enumerate(routes):
-            if not r.get("enabled", True):
-                continue
+            # 不自动跑——重启后方案默认关闭，要在「方案配置」里手动启动
             run = RouteRunner(r, i)
             with STATE.lock:
                 STATE.routes.append(run.st)
-            run.start()
             RUNNERS.append(run)
-            STATE.logline("info", "方案启动 [%s]  %s -> %s  规则 %d 条" % (
+            STATE.logline("info", "方案就绪 [%s]  %s -> %s  规则 %d 条（待手动启动）" % (
                 run.name, ",".join(run.st.topics),
                 " + ".join(run.st.dst_topics) or "-", len(run.st.rules)))
+        STATE.logline("info", "服务已启动，%d 个方案已就绪（默认未启动）" % len(RUNNERS))
+
+    def start_route(self, idx):
+        for r in RUNNERS:
+            if r.idx == idx:
+                ok, msg = r.start_route()
+                STATE.logline("info" if ok else "warn", msg)
+                return ok, msg
+        return False, "找不到方案 %s" % idx
+
+    def stop_route(self, idx):
+        for r in RUNNERS:
+            if r.idx == idx:
+                if not r.running:
+                    return True, "「%s」本来就没在跑" % r.name
+                r.shutdown()
+                STATE.logline("info", "「%s」已停止" % r.name)
+                return True, "「%s」已停止" % r.name
+        return False, "找不到方案 %s" % idx
 
     def stop(self):
         while RUNNERS:
@@ -326,6 +380,8 @@ class Engine:
                 r.shutdown()
             except Exception:
                 pass
+        with STATE.lock:
+            STATE.engine_running = False
         time.sleep(0.2)
 
 
@@ -868,9 +924,25 @@ class Handler(BaseHTTPRequestHandler):
                     ok, msg = True, "转发已停止（Web 界面还在）"
                 elif act in ("start", "restart"):
                     ENGINE.start()
-                    with STATE.lock:
-                        n = len([r for r in STATE.routes if getattr(r, "enabled", True)])
-                    ok, msg = True, "转发已启动，%d 个方案在跑" % len(STATE.routes)
+                    ok = True
+                    msg = ("服务已启动，%d 个方案已就绪（默认关闭，去「方案配置」逐个启动）"
+                           % len(STATE.routes))
+                else:
+                    ok, msg = False, "未知操作：%s" % act
+                self._send(200 if ok else 400,
+                           {"ok": ok, "message": msg, "status": STATE.snapshot()})
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+
+        elif path == "/api/route":
+            # 单个方案的启动 / 停止。服务启动时方案默认关闭，靠这个手动开。
+            idx = body.get("idx")
+            act = (body.get("action") or "").strip()
+            try:
+                if act == "start":
+                    ok, msg = ENGINE.start_route(int(idx))
+                elif act == "stop":
+                    ok, msg = ENGINE.stop_route(int(idx))
                 else:
                     ok, msg = False, "未知操作：%s" % act
                 self._send(200 if ok else 400,
