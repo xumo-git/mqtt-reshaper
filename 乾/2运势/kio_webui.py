@@ -566,6 +566,83 @@ def _named_rules(cfg, names):
     return out
 
 
+def detect_loops(cfg):
+    """检测方案之间的转发环。
+
+    把每个「broker 主题」当一个节点，每条方案的 监听→目标 当一条边。
+    存在环 = 有消息会绕回来。**只提示，不拦**。
+
+    节点按 host:port+主题 判重，不按 broker 名字 —— 同一台 broker 可能
+    起了好几个名字（比如「本地EMQX」和「IOServer转发」都是 127.0.0.1:1883），
+    按名字判会漏掉跨名字的环。
+    """
+    brokers = cfg.get("brokers") or {}
+
+    def node(bname, topic):
+        b = brokers.get(bname) or {}
+        return ("%s:%s" % (b.get("host") or "?", b.get("port") or 1883),
+                topic or "-")
+
+    edges = []          # (起点, 终点, 方案名)
+    for r in (cfg.get("routes") or []):
+        if r.get("enabled") is False:
+            continue
+        frm = r.get("from") or {}
+        topics = frm.get("topics") or ([frm["topic"]] if frm.get("topic") else [])
+        raw = r.get("targets")
+        if raw is None:
+            raw = [r["to"]] if r.get("to") else []
+        for t in raw:
+            if not isinstance(t, dict):
+                continue
+            for st in topics:
+                edges.append((node(frm.get("broker"), st),
+                              node(t.get("broker"), t.get("topic")),
+                              r.get("name") or "方案"))
+
+    # 用 DFS 找所有简单环
+    adj = {}
+    for s, d, _ in edges:
+        adj.setdefault(s, []).append(d)
+
+    found, seen = [], set()
+    stack, onstack = [], []
+
+    def dfs(u):
+        stack.append(u)
+        onstack.append(u)
+        for v in adj.get(u, []):
+            if v in onstack:
+                i = onstack.index(v)
+                cyc = onstack[i:] + [v]
+                key = tuple(sorted(set(cyc)))
+                if key not in seen:
+                    seen.add(key)
+                    found.append(cyc)
+            elif v not in stack:
+                dfs(v)
+        stack.pop()
+        onstack.pop()
+
+    for u in list(adj):
+        if u not in stack:
+            dfs(u)
+
+    # 换成可读描述
+    out = []
+    for cyc in found:
+        hops = []
+        for i in range(len(cyc) - 1):
+            names = sorted({r for s, d, r in edges
+                            if s == cyc[i] and d == cyc[i + 1]})
+            hops.append("%s → %s（%s）" % (
+                cyc[i][0] + "/" + cyc[i][1],
+                cyc[i + 1][0] + "/" + cyc[i + 1][1],
+                "、".join(names) or "?"))
+        out.append({"nodes": ["%s/%s" % n for n in cyc], "steps": hops})
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -588,7 +665,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             self._send(200, load_html(), "text/html; charset=utf-8")
         elif path == "/api/status":
-            self._send(200, STATE.snapshot())
+            st = STATE.snapshot()
+            try:
+                with STATE.lock:
+                    cfg = json.loads(json.dumps(STATE.cfg))
+                st["loops"] = detect_loops(cfg)
+            except Exception:
+                st["loops"] = []
+            self._send(200, st)
         elif path == "/api/feed":
             idx = _int(q, "route", 0)
             rs = route_state(idx)
@@ -1003,6 +1087,18 @@ class Handler(BaseHTTPRequestHandler):
                                       % (n, b.get("host"), b.get("port"), r.get("message")))
             except Exception as e:
                 failed.append("broker 探测出错：%s" % e)
+
+            # 转发环检测：只提示，不拦
+            try:
+                loops = detect_loops(cfg or {})
+                if loops:
+                    for lp in loops:
+                        failed.append("检测到转发环（消息会绕回来）：" +
+                                      " → ".join(lp["nodes"]))
+                else:
+                    found.append("方案之间无转发环")
+            except Exception as e:
+                failed.append("转发环检测出错：%s" % e)
 
             self._send(200, {"found": found, "fixed": fixed, "failed": failed,
                              "ok": not failed})

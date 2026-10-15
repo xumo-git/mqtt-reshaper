@@ -327,6 +327,8 @@
     <span class="hint" id="sel-hint" style="align-self:center">先在下方列表里选一个方案</span>
   </div>
 
+  <div id="loop-warn"></div>
+
   <div class="card">
     <h2>方案列表 <span class="tag" id="rt-count">0 条</span></h2>
     <table>
@@ -905,6 +907,7 @@ async function loadStatus(){
     fillFeedRouteSelect(s.routes);
     if((s.routes||[]).length && feedRoute==null) feedRoute = s.routes[0].idx;
     renderRoutes();          // 方案列表的「运行中/已停止」跟着刷新
+    renderLoops(s.loops);    // 转发环提示（只提示不拦）
     // 心跳反映的是「服务在不在跑」，不只是 Web 通不通：
     // 服务停了（engine=false）同样要灰掉 + 小人抓狂
     setAlive(s.engine !== false);
@@ -1330,6 +1333,35 @@ function brokerOptions(sel, role){
 let selRoute = -1;   // 方案配置页里选中的方案下标
 let lastStatus = null;   // 最近一次 /api/status，方案跑没跑以它为准
 let feedRoute = 0;   // 实时数据页正在观察的方案下标
+
+// 转发环提示：只提示不拦。方案之间首尾相接时消息会绕回来。
+function renderLoops(loops){
+  const box = $('#loop-warn');
+  if(!box) return;
+  if(!loops || !loops.length){ box.innerHTML = ''; return }
+  box.innerHTML = `
+    <div class="card" style="border-color:rgba(248,81,73,.45);background:rgba(248,81,73,.07)">
+      <h2 style="color:var(--err)">⚠ 检测到转发环 <span class="tag">${loops.length} 处</span></h2>
+      <div class="hint">
+        这些方案<b>首尾相接</b>，消息会绕回来一直转 —— 有可能把 broker 打满。<br>
+        只提示不拦，改不改你自己定。
+      </div>
+      ${loops.map((lp,i)=>`
+        <div style="margin:10px 0;padding:10px 12px;border-left:3px solid var(--err);background:var(--bg);border-radius:0 8px 8px 0">
+          <b>环 ${i+1}</b>
+          <div class="mono" style="margin-top:6px;font-size:12px">
+            ${lp.steps.map(s=>'　'+esc(s)).join('<br>')}
+          </div>
+          <div class="hint" style="margin-top:6px">
+            节点：<span class="mono">${lp.nodes.map(esc).join(' → ')}</span>
+          </div>
+        </div>`).join('')}
+      <div class="hint">
+        <b>怎么断开</b>：改掉其中一条方案的目标主题，让它发到一个没人监听的地方；
+        或者给规则的<b>匹配条件</b>设成只认自己吃的那种报文格式 —— 转出来的格式对方不认，也就转不回去。
+      </div>
+    </div>`;
+}
 
 function renderRoutes(){
   const rows = EDIT.routes.map((r,i)=>{
