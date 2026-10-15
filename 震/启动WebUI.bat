@@ -20,11 +20,11 @@ if not exist "%~dp0launch.py" (
   exit /b 1
 )
 
-rem open the browser: done by launch.py (after the server binds).
-rem do NOT call `start` from here -- cmd's start chokes on nested quotes
-rem and prints "Access is denied."
-"%PY%" -I "%~dp0launch.py" webui 8090
+rem run detached: no black window stays open. the service keeps running even
+rem after this window closes. stop it with 巽\stop.bat (its Chinese name is
+rem picked up by the OS; only this file's *contents* must stay ASCII).
+"%PY%" -I "%~dp0launch.py" webui 8090 --bg
 
 echo.
-echo [stopped]
+echo [done]
 pause

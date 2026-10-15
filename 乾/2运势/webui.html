@@ -31,6 +31,19 @@
   #app-title:hover{filter:brightness(1.2)}
   #app-title.dead{background:none;-webkit-background-clip:border-box;
                   background-clip:border-box;color:#6b7280;animation:none}
+  /* 掉线时的小人：抓狂抖动 */
+  .mood{align-self:center;margin-left:10px;display:none;font-size:13px;
+        color:var(--err);white-space:nowrap}
+  .mood.show{display:flex;align-items:center;gap:7px}
+  .mood .face{font-size:24px;line-height:1;animation:flail .55s ease-in-out infinite}
+  .mood .say{font-weight:600;animation:blink 1.4s ease-in-out infinite}
+  @keyframes flail{
+    0%,100%{transform:rotate(-11deg) translateX(-2px)}
+    25%{transform:rotate(11deg) translateX(2px)}
+    50%{transform:rotate(-11deg) translateX(-2px)}
+    75%{transform:rotate(11deg) translateX(2px)}
+  }
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
   @keyframes hb{
     0%,100%{opacity:1}
     32%{opacity:.74}
@@ -187,7 +200,8 @@
 <body>
 
 <header>
-  <h1 id="app-title" title="点击重启服务" onclick="restart()">MQTT 转发</h1>
+  <h1 id="app-title" title="点击重建转发连接" onclick="restart()">MQTT 转发</h1>
+  <div id="mood" class="mood" aria-hidden="true"></div>
   <div class="motto">共产 · 共和 · 大同</div>
   <div class="stats">
     <div class="stat"><b id="s-in">0</b><span>收到</span></div>
@@ -205,6 +219,7 @@
   <button data-s="routes">方案配置</button>
   <button data-s="test">模拟测试</button>
   <button data-s="log">审计追踪</button>
+  <button data-s="sys">系统设置</button>
 </nav>
 
 <main>
@@ -737,6 +752,46 @@
   </div>
 </section>
 
+  <!-- ================= 系统设置 ================= -->
+  <section id="s-sys">
+    <div class="card">
+      <h2>服务状态 <span class="tag" id="sys-badge">还没检测</span></h2>
+      <div id="sys-detail" class="hint">点下面的「状态检测」跑一遍体检。</div>
+      <div class="btn-group">
+        <button class="btn sec" onclick="sysCheck()">状态检测</button>
+        <button class="btn" onclick="sysHeal()">自动修复</button>
+        <button class="btn sec" onclick="sysEngine('start')">启动转发</button>
+        <button class="btn sec" onclick="sysEngine('stop')">停止转发</button>
+        <button class="btn sec" onclick="restart()">重建转发连接</button>
+      </div>
+      <div class="hint">
+        <b>启动 / 停止转发</b> = 只管收发 MQTT 那部分，界面本身不受影响<br>
+        <b>重建转发连接</b> = 改完配置点它生效（重连 MQTT，不重启程序）<br>
+        <b>自动修复</b> = 逐项体检：配置能不能读、方案解析对不对、存储能不能用、
+        每个 broker 通不通，然后把能修的当场修掉
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>「服务」是两层，别混</h2>
+      <div class="hint">
+        <b>① Web 服务</b> —— 就是这个页面本身。它一停，页面上所有按钮都点不动
+        （网页没法启动本地程序）。它是靠 <code>震\启动WebUI.bat</code> 起来的。<br>
+        <b>② 转发引擎</b> —— 真正收发 MQTT 的那部分。上面的「启动 / 停止转发」管的是它。<br><br>
+        想让 ① 永远在、彻底不用碰 bat，最省事的是<b>注册开机自启</b>。这条得你自己跑
+        （注册登录时自启属于系统级操作，界面不替你做）：
+      </div>
+      <div class="mono" style="margin-top:8px;padding:11px 13px;background:var(--bg);border:1px solid var(--line);border-radius:8px;font-size:11px;word-break:break-all">
+        schtasks /Create /TN "MQTT-Forwarder-WebUI" /TR "&lt;python&gt; -I &lt;项目&gt;\震\launch.py webui 8090 --bg" /SC ONLOGON /F
+      </div>
+      <div class="hint">
+        取消：<code>schtasks /Delete /TN "MQTT-Forwarder-WebUI" /F</code><br>
+        <span class="dim">&lt;python&gt; 是 python.exe 的完整路径，&lt;项目&gt; 是本项目的目录。
+        要我帮你拼好这条命令也可以，说一声。</span>
+      </div>
+    </div>
+  </section>
+
 </main>
 <!-- ============ 手动选择配置文件 ============ -->
 <div id="filedlg" class="mask" style="display:none">
@@ -781,6 +836,8 @@ function go(name){
   const btn=document.querySelector(`nav button[data-s="${name}"]`);
   if(btn) btn.classList.add('on');
   const sec=$('#s-'+name); if(sec) sec.classList.add('on');
+  if(name==='live'){ loadStatus(); }                       // 方案状态刷新
+  if(name==='sys'){ sysCheck(); }                          // 系统设置先体检一遍
   if(name==='log'){ fillHistoryRoutes(); loadHistory(); loadEvents(); }
   if(name==='brokers'||name==='routes') loadCfg();
   if(name==='json') loadCfg();
@@ -798,14 +855,21 @@ function setStat(el,connected,lastTs){
   else{el.textContent='在线';el.className='stat-pill on'}
 }
 
-// 标题心跳：连得上后端 = 绿青闪烁，连不上 = 灰色
+// 标题心跳：连得上后端 = 绿青闪烁，连不上 = 灰色 + 抓狂小人
 function setAlive(on){
   const t = $('#app-title');
-  if(!t) return;
-  t.classList.toggle('dead', !on);
-  t.title = on
-    ? '服务正常 · 点击重建转发连接（不是重启整个程序）'
-    : '连不上后端 · 服务没在跑，点这里只会提示，去双击 震\\启动WebUI.bat 启动';
+  if(t){
+    t.classList.toggle('dead', !on);
+    t.title = on
+      ? '服务正常 · 点击重建转发连接（不是重启整个程序）'
+      : '连不上后端 · 服务没在跑，点这里只会提示，去双击 震\\启动WebUI.bat 启动';
+  }
+  const m = $('#mood');
+  if(m){
+    m.classList.toggle('show', !on);
+    m.innerHTML = on ? ''
+      : '<span class="face">🤯</span><span class="say">掉线了！</span>';
+  }
 }
 
 async function loadStatus(){
@@ -969,6 +1033,7 @@ function renderBrokerList(){
         <span class="pill">主题 ${esc(b.topic||'-')}</span>
       </div>
       <div class="bkacts">
+        <span class="stat-pill" data-bst="${esc(n)}" title="点击下方按钮或切页时检测">检测中…</span>
         <button class="btn sec mini" data-act="edit">编辑</button>
         <button class="btn del mini" data-act="del">删除</button>
       </div>
@@ -980,6 +1045,28 @@ function renderBrokerList(){
     row.querySelector('[data-act="edit"]').onclick = ()=>editBroker(n);
     row.querySelector('[data-act="del"]').onclick  = ()=>delBroker(n);
     row.onclick = (e)=>{ if(e.target.dataset.act===undefined) editBroker(n) };
+  });
+  scheduleBrokerStatus();      // 列表一变就重测连通性
+}
+
+// 重测连通性要发请求，稍微合并一下，免得连续几次渲染打出一串探测
+let _bstTimer = null;
+function scheduleBrokerStatus(){
+  if(_bstTimer) clearTimeout(_bstTimer);
+  _bstTimer = setTimeout(loadBrokerStatus, 300);
+}
+
+// 已存储 broker 的连通性。切到配置broker 页时自动测一遍。
+async function loadBrokerStatus(){
+  let d;
+  try{ d = await j('/api/broker_status') }catch(e){ return }
+  const map = d.brokers || {};
+  document.querySelectorAll('[data-bst]').forEach(el=>{
+    const r = map[el.dataset.bst];
+    if(!r){ el.className='stat-pill off'; el.textContent='未知'; return }
+    el.className = 'stat-pill ' + (r.ok ? 'on' : 'off');
+    el.textContent = r.ok ? '在线' : '离线';
+    el.title = r.message + (r.elapsed_ms!=null ? '（'+r.elapsed_ms+'ms）' : '');
   });
 }
 
@@ -1946,6 +2033,94 @@ async function runLiveTest(){
     `<tr><td class="dim">${i+1}</td><td class="mono">${esc(m.topic||'')}</td>
      <td><pre>${esc(m.body||'')}</pre></td></tr>`).join('')
     || '<tr><td colspan="3" class="dim" style="padding:18px">目标主题没收到东西 — 转发链路可能没跑，或方案没在运行</td></tr>';
+}
+
+/* ---------------- 系统设置 ---------------- */
+function fmtDur(sec){
+  sec = Math.max(0, Math.floor(sec||0));
+  if(sec<60) return sec+' 秒';
+  if(sec<3600) return Math.floor(sec/60)+' 分 '+(sec%60)+' 秒';
+  return Math.floor(sec/3600)+' 小时 '+Math.floor((sec%3600)/60)+' 分';
+}
+
+async function sysCheck(){
+  const box = $('#sys-detail'), badge = $('#sys-badge');
+  badge.textContent = '检测中…';
+  box.innerHTML = '<span class="dim">正在检查…</span>';
+
+  let s = null;
+  try{ s = await j('/api/status'); setAlive(true) }
+  catch(e){
+    setAlive(false);
+    badge.textContent = '离线';
+    box.innerHTML = '<span class="err">连不上后端 —— Web 服务没在跑。'
+      + '网页无法启动本地程序，请双击 <code>震\\启动WebUI.bat</code></span>';
+    return;
+  }
+
+  const routes = s.routes || [];
+  const bad = routes.filter(r=>!r.src_connected || !r.dst_connected);
+  const drops = routes.reduce((a,r)=>a+((r.stats||{}).drop||0), 0);
+  const lines = [];
+  lines.push('Web 服务：<b class="ok">在线</b>，已运行 ' + fmtDur(s.uptime));
+  lines.push('转发引擎：<b class="'+(routes.length?'ok':'warn')+'">'
+             + (routes.length ? routes.length+' 个方案在跑' : '没有方案') + '</b>');
+  routes.forEach(r=>{
+    const good = r.src_connected && r.dst_connected;
+    lines.push('　' + esc(r.name) + '：<b class="'+(good?'ok':'err')+'">'
+      + (good?'正常':'有断开') + '</b>　'
+      + (r.src_connected?'监听 ✓':'监听 ✗') + '  '
+      + (r.dst_connected?'目标 ✓':'目标 ✗') + '  '
+      + '收 ' + ((r.stats||{}).in||0) + ' / 转 ' + ((r.stats||{}).out||0)
+      + (((r.stats||{}).bad||0) ? ' / <span class="warn">解析失败 ' + r.stats.bad + '</span>' : '')
+      + (((r.stats||{}).drop||0) ? ' / <span class="err">发布失败 ' + r.stats.drop + '</span>' : ''));
+  });
+
+  let health = routes.length && !bad.length && !drops;
+  badge.textContent = health ? '一切正常' : (bad.length ? '有方案断开' : (drops ? '有发布失败' : '正常'));
+  badge.className = 'tag ' + (health ? 'ok' : 'warn');
+  box.innerHTML = lines.join('<br>')
+    + (health ? '' : '<br><br><span class="warn">点「自动修复」试试，多半是连接掉了。</span>');
+}
+
+async function sysHeal(){
+  const box = $('#sys-detail'), badge = $('#sys-badge');
+  badge.textContent = '修复中…';
+  box.innerHTML = '<span class="dim">正在体检并修复，稍等…</span>';
+  let d;
+  try{ d = await j('/api/selfheal',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}) }
+  catch(e){
+    setAlive(false);
+    box.innerHTML = '<span class="err">连不上后端 —— Web 服务没在跑，自动修复也得它活着才能做。'
+      + '请双击 <code>震\\启动WebUI.bat</code></span>';
+    return;
+  }
+  setAlive(true);
+  const sec = (title, arr, cls) => arr && arr.length
+    ? '<div style="margin:8px 0 3px"><b class="'+cls+'">'+title+'</b></div>'
+      + arr.map(x=>'　'+esc(x)).join('<br>') : '';
+  badge.textContent = d.ok ? '修复完成' : '有没修好的';
+  badge.className = 'tag ' + (d.ok ? 'ok' : 'warn');
+  box.innerHTML =
+    sec('修好了', d.fixed, 'ok') +
+    sec('检查结果', d.found, 'dim') +
+    sec('没修好 / 需要你处理', d.failed, 'err');
+  loadStatus();
+}
+
+async function sysEngine(act){
+  const box = $('#sys-detail');
+  let d;
+  try{
+    d = await j('/api/engine',{method:'POST',headers:{'Content-Type':'application/json'},
+                               body:JSON.stringify({action:act})});
+  }catch(e){
+    setAlive(false);
+    return toast('连不上后端 —— 请双击 震\\启动WebUI.bat 启动');
+  }
+  setAlive(true);
+  toast(d.message || '已执行');
+  sysCheck();
 }
 
 /* ---------------- log ---------------- */

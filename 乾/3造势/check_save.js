@@ -91,7 +91,20 @@ function el(id) {
   const e = {
     id, value: '', textContent: '', innerHTML: '', checked: false, disabled: false,
     style: {}, dataset: {}, className: '',
-    classList: { add() {}, remove() {}, toggle() {} },
+    // classList 要真记状态，否则没法断言「掉线时有没有挂上 show」
+    classList: (() => {
+      const s = new Set();
+      return {
+        add: (...c) => c.forEach(x => s.add(x)),
+        remove: (...c) => c.forEach(x => s.delete(x)),
+        toggle: (c, f) => {
+          const on = f === undefined ? !s.has(c) : !!f;
+          if (on) s.add(c); else s.delete(c);
+          return on;
+        },
+        contains: c => s.has(c),
+      };
+    })(),
     focus() {}, appendChild() {},
     querySelectorAll: () => [], querySelector: () => null,
   };
@@ -142,7 +155,7 @@ const sandbox = new Function(
   src + '; return {EDIT, saveRule, newRule, editRule, delRule, addField, renderFields,' +
   '       toggleRule, dupRule, renderRuleLib, rlOpen,' +
   '       fillRulePicks, pickedRules, pickAllRules, clearRules, ruleInfo,' +
-  '       mergeSamples, updateSample, splitHostPort, togglePwd,' +
+  '       mergeSamples, updateSample, splitHostPort, togglePwd, setAlive,' +
   '       loadCfg, persistSoon, flushPending, setRlFields:(f)=>{rlFields=f},' +
   '       getRlFields:()=>rlFields};'
 )(document, window, fetch, EventSource, console, setTimeout, clearTimeout);
@@ -282,12 +295,29 @@ function type(idx, left, right) {
   const nav = (html.match(/<nav>([\s\S]*?)<\/nav>/) || [, ''])[1];
   const labels = [...nav.matchAll(/>([^<]+)<\/button>/g)].map(m => m[1].trim());
   check('导航顺序', labels,
-    ['实时数据', '配置broker', '规则配置', '方案配置', '模拟测试', '审计追踪']);
+    ['实时数据', '配置broker', '规则配置', '方案配置', '模拟测试', '审计追踪', '系统设置']);
   check('已无「规则库」', html.indexOf('规则库'), -1);
   check('已无「规则试算」', html.indexOf('规则试算'), -1);
   check('模拟测试有两个子页',
     html.indexOf('离线转换测试') >= 0 && html.indexOf('在线转换测试') >= 0, true);
   check('有在线测试按钮', html.indexOf('runLiveTest') >= 0, true);
+
+  console.log('\n== 系统设置 / 掉线小人 ==');
+  check('系统设置页存在', html.indexOf('id="s-sys"') >= 0, true);
+  check('状态检测按钮', html.indexOf('sysCheck()') >= 0, true);
+  check('自动修复按钮', html.indexOf('sysHeal()') >= 0, true);
+  check('启动转发', html.indexOf("sysEngine('start')") >= 0, true);
+  check('停止转发', html.indexOf("sysEngine('stop')") >= 0, true);
+  check('小人容器', html.indexOf('id="mood"') >= 0, true);
+  check('抓狂动画', html.indexOf('@keyframes flail') >= 0, true);
+  // 服务活着时小人不出现；掉了才出来喊「掉线了」
+  sandbox.setAlive(true);
+  check('正常时不显示小人', store['mood'].classList.contains('show'), false);
+  check('正常时标题不是灰色', store['app-title'].classList.contains('dead'), false);
+  sandbox.setAlive(false);
+  check('掉线时小人出现', store['mood'].innerHTML.indexOf('掉线了') >= 0, true);
+  check('掉线时小人带 show', store['mood'].classList.contains('show'), true);
+  check('掉线时标题变灰', store['app-title'].classList.contains('dead'), true);
 
   console.log('\n== 规则选择器：勾了就要认（不许再说"没勾"） ==');
   await sandbox.loadCfg();

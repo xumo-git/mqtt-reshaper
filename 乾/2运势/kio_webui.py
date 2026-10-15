@@ -591,6 +591,30 @@ class Handler(BaseHTTPRequestHandler):
             info = get_store().storage_info()
             info["actions"] = get_actions().counts()
             self._send(200, info)
+        elif path == "/api/broker_status":
+            # 已存 broker 的连通性（只读，所以放 GET）。并行探——串行的话每个
+            # 都要等超时，切个页面要卡好几秒。随机 client_id，不会踢掉在用会话。
+            try:
+                with STATE.lock:
+                    brokers = json.loads(json.dumps(STATE.cfg.get("brokers") or {}))
+                out, lk = {}, threading.Lock()
+
+                def _probe(name, b):
+                    r = probe_broker(b.get("host"), b.get("port") or 1883,
+                                     (b.get("username") or "").strip() or None,
+                                     b.get("password"), 4)
+                    with lk:
+                        out[name] = r
+
+                ths = [threading.Thread(target=_probe, args=(n, b), daemon=True)
+                       for n, b in brokers.items()]
+                for t in ths:
+                    t.start()
+                for t in ths:
+                    t.join(timeout=8)
+                self._send(200, {"brokers": out})
+            except Exception as e:
+                self._send(500, {"error": str(e)})
         elif path == "/api/export":
             st = get_store()
             csv = st.export_csv(
@@ -833,6 +857,83 @@ class Handler(BaseHTTPRequestHandler):
                 })
             except Exception as e:
                 self._send(500, {"error": str(e)})
+
+        elif path == "/api/engine":
+            # 转发引擎启停。注意：这只管「转发」，Web 服务本身不在这里管——
+            # 网页没法启动/杀死自己所在的进程，那要靠 bat 或开机自启。
+            act = (body.get("action") or "").strip()
+            try:
+                if act == "stop":
+                    ENGINE.stop()
+                    ok, msg = True, "转发已停止（Web 界面还在）"
+                elif act in ("start", "restart"):
+                    ENGINE.start()
+                    with STATE.lock:
+                        n = len([r for r in STATE.routes if getattr(r, "enabled", True)])
+                    ok, msg = True, "转发已启动，%d 个方案在跑" % len(STATE.routes)
+                else:
+                    ok, msg = False, "未知操作：%s" % act
+                self._send(200 if ok else 400,
+                           {"ok": ok, "message": msg, "status": STATE.snapshot()})
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+
+        elif path == "/api/selfheal":
+            # 自动诊断 + 修复：能修的当场修，修不了的说清楚为什么。
+            found, fixed, failed = [], [], []
+            cfg = None
+            try:
+                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                found.append("配置文件可读（%d 字节）" % os.path.getsize(CONFIG_PATH))
+            except Exception as e:
+                failed.append("配置文件读不出来：%s" % e)
+
+            if cfg is not None:
+                try:
+                    rs = load_routes(cfg)
+                    found.append("配置解析正常，%d 个方案" % len(rs))
+                except Exception as e:
+                    failed.append("方案配置有问题，可能是 broker 名字对不上：%s" % e)
+
+            try:
+                c = get_store().counts()
+                found.append("报文库可用：%d 段 / %.1f MB / %d 条"
+                             % (c.get("segments") or 0, c.get("total_mb") or 0,
+                                c.get("messages") or 0))
+            except Exception as e:
+                failed.append("报文库不可用：%s" % e)
+
+            try:
+                a = get_actions().counts()
+                found.append("动作记录可用：%d 条" % (a.get("actions") or 0))
+            except Exception as e:
+                failed.append("动作记录不可用：%s" % e)
+
+            # 连接重建是「修」的核心——大多数问题重连一下就好
+            try:
+                ENGINE.start()
+                fixed.append("已重建全部转发连接（监听 / 目标各重新握手）")
+            except Exception as e:
+                failed.append("重建连接失败：%s" % e)
+
+            # broker 逐个探，通的说通，不通的报出来
+            try:
+                brokers = (cfg or {}).get("brokers") or {}
+                for n, b in brokers.items():
+                    r = probe_broker(b.get("host"), b.get("port") or 1883,
+                                     (b.get("username") or "").strip() or None,
+                                     b.get("password"), 4)
+                    if r.get("ok"):
+                        found.append("broker「%s」%s:%s 连得上" % (n, b.get("host"), b.get("port")))
+                    else:
+                        failed.append("broker「%s」%s:%s 连不上 —— %s"
+                                      % (n, b.get("host"), b.get("port"), r.get("message")))
+            except Exception as e:
+                failed.append("broker 探测出错：%s" % e)
+
+            self._send(200, {"found": found, "fixed": fixed, "failed": failed,
+                             "ok": not failed})
 
         elif path == "/api/restart":
             threading.Thread(target=ENGINE.start, daemon=True).start()

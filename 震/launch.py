@@ -49,7 +49,36 @@ def _open_browser(url):
         print("[提示] 浏览器没自动打开，请手动访问 %s  (%s)" % (url, e))
 
 
+def detach(args):
+    """后台起服务，不占黑窗。
+
+    用 DETACHED_PROCESS 让子进程脱离当前控制台——这样父窗口关掉、
+    或者双击的那个窗口消失，服务照样跑。日志落文件，要看就看文件。
+    """
+    import subprocess
+    log = os.path.join(OPS, "服务日志.txt")
+    cmd = [sys.executable, "-I", os.path.abspath(__file__)] + list(args)
+    flags = 0
+    if os.name == "nt":
+        flags = 0x00000008 | 0x08000000      # DETACHED_PROCESS | CREATE_NO_WINDOW
+    with open(log, "ab", buffering=0) as f:
+        subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT,
+                         stdin=subprocess.DEVNULL,
+                         creationflags=flags, close_fds=True)
+    print("已在后台运行，不占窗口。")
+    print("  日志     :", log)
+    print("  停止     : 双击 巽\\停止.bat")
+    print("  看状态   : 双击 巽\\状态.bat")
+
+
 def main():
+    argv = [a for a in sys.argv[1:]]
+    # --bg 由 bat 传进来：先把服务扔到后台，自己立刻退出
+    if "--bg" in argv:
+        argv.remove("--bg")
+        detach(argv)
+        return 0
+
     if not os.path.isdir(RUN):
         print("[ERROR] 找不到运行目录:", RUN)
         return 1
@@ -57,14 +86,14 @@ def main():
         print("[ERROR] 找不到配置文件:", CFG)
         return 1
 
-    mode = (sys.argv[1] if len(sys.argv) > 1 else "webui").strip().lower()
+    mode = (argv[0] if len(argv) > 0 else "webui").strip().lower()
     if mode == "reshaper":
         banner("仅转发")
         sys.argv = ["kio_reshaper.py", CFG]
         runpy.run_path(os.path.join(RUN, "kio_reshaper.py"), run_name="__main__")
     else:
         banner("Web 控制台")
-        port = sys.argv[2] if len(sys.argv) > 2 else "8090"
+        port = argv[1] if len(argv) > 1 else "8090"
         url = "http://127.0.0.1:%s/" % port
         # 浏览器由 Python 拉，不要让 .bat 去 start：
         #   1) cmd 的 start 在嵌套引号里会报「拒绝访问」
