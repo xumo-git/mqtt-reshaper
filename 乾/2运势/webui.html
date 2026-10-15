@@ -23,6 +23,21 @@
   .motto{align-self:center;margin-left:14px;padding-left:14px;
          border-left:1px solid var(--line);
          color:var(--dim);opacity:.5;font-size:11px;letter-spacing:3px;white-space:nowrap}
+  /* 标题 = 服务心跳：绿→青渐变双跳闪 = 活着；灰色 = 后端连不上 */
+  #app-title{cursor:pointer;user-select:none;flex:none;
+             background:linear-gradient(90deg,#56d364,#00e5ff);
+             -webkit-background-clip:text;background-clip:text;color:transparent;
+             animation:hb 4s ease-in-out infinite}
+  #app-title:hover{filter:brightness(1.2)}
+  #app-title.dead{background:none;-webkit-background-clip:border-box;
+                  background-clip:border-box;color:#6b7280;animation:none}
+  @keyframes hb{
+    0%,100%{opacity:1}
+    32%{opacity:.74}
+    50%{opacity:.95}
+    72%{opacity:.74}
+    88%{opacity:.98}
+  }
   .stat{text-align:right}
   .stat b{display:block;font-size:20px;font-weight:600;line-height:1.2}
   .stat span{color:var(--dim);font-size:11px}
@@ -783,9 +798,20 @@ function setStat(el,connected,lastTs){
   else{el.textContent='在线';el.className='stat-pill on'}
 }
 
+// 标题心跳：连得上后端 = 绿青闪烁，连不上 = 灰色
+function setAlive(on){
+  const t = $('#app-title');
+  if(!t) return;
+  t.classList.toggle('dead', !on);
+  t.title = on
+    ? '服务正常 · 点击重建转发连接（不是重启整个程序）'
+    : '连不上后端 · 服务没在跑，点这里只会提示，去双击 震\\启动WebUI.bat 启动';
+}
+
 async function loadStatus(){
   try{
     const s = await j('/api/status');
+    setAlive(true);
     let in_=0,out=0,bad=0,drop=0;
     (s.routes||[]).forEach(r=>{
       in_+=r.stats.in; out+=r.stats.out; bad+=r.stats.bad; drop+=r.stats.drop;
@@ -812,7 +838,7 @@ async function loadStatus(){
     });
     fillFeedRouteSelect(s.routes);
     if((s.routes||[]).length && feedRoute==null) feedRoute = s.routes[0].idx;
-  }catch(e){}
+  }catch(e){ setAlive(false) }
 }
 
 /* ---------------- feed ---------------- */
@@ -1064,7 +1090,11 @@ async function testConn(){
       body: JSON.stringify({host:host, port:port, username:user, password:pass, timeout:5})
     });
   }catch(e){
-    r = {ok:false, message:'请求失败: '+(e.message||e)};
+    const m = String(e && e.message || e);
+    // fetch 失败多半是服务没在跑，别只说「请求失败」——那看着像 broker 的问题
+    r = /fetch|network|Failed/i.test(m)
+      ? {ok:false, message:'连不上本服务 —— Web 控制台没在运行。双击 震\\启动WebUI.bat 启动，然后刷新本页'}
+      : {ok:false, message:'请求失败: '+m};
   }
   if(btn){ btn.disabled = false; btn.textContent = '测试通路' }
 
@@ -1706,8 +1736,16 @@ async function saveCfg(){
 async function restart(){
   // flush anything still pending so a quick click can't lose an edit
   if(persistTimer){ clearTimeout(persistTimer); persistTimer=null; await persist(false,true) }
-  await j('/api/restart',{method:'POST'});
-  toast('服务已重启');
+  try{
+    await j('/api/restart',{method:'POST'});
+  }catch(e){
+    setAlive(false);
+    toast('连不上后端 —— 服务没在跑，去双击 震\\启动WebUI.bat 启动');
+    return;
+  }
+  // 说明白：这里只重建转发连接，不是重启整个程序
+  setAlive(true);
+  toast('转发连接已重建 · 改过的配置已生效');
   setTimeout(loadAll,800);
 }
 
