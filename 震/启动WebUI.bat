@@ -21,8 +21,8 @@ if not exist "%~dp0launch.py" (
 )
 
 rem run detached: no black window stays open. the service keeps running even
-rem after this window closes. stop it with 巽\stop.bat (its Chinese name is
-rem picked up by the OS; only this file's *contents* must stay ASCII).
+rem after this window closes. stop it with stop.bat (the Chinese-named bat)
+rem only this file *contents* must stay ASCII).
 "%PY%" -I "%~dp0launch.py" webui 8090 --bg
 
 echo.
